@@ -1,0 +1,3 @@
+beacontools
+paho-mqtt
+pybluez
