@@ -10,7 +10,7 @@ class Effector(Position):
     def __init__(self, idx, latitude, longitude, name, mac):
         Position.__init__(self, latitude, longitude, name)
         self.idx = idx
-        self.mac = mac
+        self.mac = mac.lower()
 
 class Effectors:
     def __init__(self, effectors):
