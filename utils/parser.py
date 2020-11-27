@@ -1,6 +1,9 @@
-from map.elements.effector import Effectors
+from map.elements.effector import Effectors, Effector
 from map.elements.node import Node
 from map.elements.nodes import Nodes
+import re
+
+patt = re.compile("[^\t]+")
 
 class Parser:
     class __Parser:
@@ -8,9 +11,15 @@ class Parser:
             self.data_dir = data_dir
 
         def parse_node(self, idx, node):
-            splits = node.split(" ")
+            # splits = node.split(r'\t+')
+            splits = list(filter(lambda x : x != "", node.replace("\n", "").split(" ")))
             assert len(splits) == 4, "Wrong init of node"
             return Node(idx, float(splits[0]), float(splits[1]), splits[2], splits[3])
+
+        def parse_effector(self, idx, effector):
+            splits = list(filter(lambda x : x != "", effector.replace("\n", "").split(" ")))
+            assert len(splits) == 4, "Wrong init of effector"
+            return Effector(idx, float(splits[0]), float(splits[1]), splits[2], splits[3])
 
         def read_nodes(self):
             nodes = []
@@ -25,7 +34,7 @@ class Parser:
                 # saving adjacency as dictionary
                 for i, adjacency_row in enumerate(adjacency_matrix):
                     adjacency[i] = []
-                    for j, val in enumerate(adjacency_row.split(" ")):
+                    for j, val in enumerate(adjacency_row.split(r'\t+')):
                         if val == "1":
                             adjacency[i].append(j)
             return Nodes(nodes, adjacency)
@@ -35,7 +44,7 @@ class Parser:
             with open(self.data_dir + "effectors.txt", "r") as effectors_data:
                 for i, data in enumerate(effectors_data):
                     if i > 0:
-                        effectors.append(self.parse_node(i, data))
+                        effectors.append(self.parse_effector(i, data))
                     else:
                         num_effectors = int(data.replace("\n", ""))
             return Effectors(effectors)
