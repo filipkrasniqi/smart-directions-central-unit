@@ -18,7 +18,7 @@ Communicates RSSI to brain
 TODO brain:
 - it is NOT one of the nodes
 - 1)
-- collects data from all nodes -> implement until here
+- collects assets from all nodes -> implement until here
 - 2)
 - every time t, computes localization (my algorithm? other? TODO search) for each device given info of other nodes. It may be that it won't receive them; in that case, it will provide very low RSSI by default
 - 3)
