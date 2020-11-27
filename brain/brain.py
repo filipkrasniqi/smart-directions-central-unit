@@ -7,7 +7,7 @@ def start():
     data_path = "../assets/"
     parser = Parser(data_path).getInstance()
     nodes, effectors = parser.read_nodes(), parser.read_effectors()
-    subscriberThread = MQTTSubscriber("MQTT")
+    subscriberThread = MQTTSubscriber("MQTT", nodes, effectors)
     subscriberThread.start()
 
 if __name__ == "__main__":
