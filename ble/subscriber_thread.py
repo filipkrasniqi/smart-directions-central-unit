@@ -130,7 +130,6 @@ class MQTTSubscriber(LogThread):
         self.nodes, self.effectors = nodes, effectors
 
         # start timer executing localization thread
-        # TimerOfLocalization(self).run()
         t1 = threading.Thread(target=self.run_timer)
         t1.start()
 
@@ -144,6 +143,11 @@ class TimerOfLocalization(LogThread):
 
     def run(self):
         while True:
-            localizationTimer = LocalizationTimer(self.subscriberThread.client, self.subscriberThread.nodes, self.subscriberThread.effectors, self.subscriberThread.devices_dict)
+            localizationTimer = LocalizationTimer(
+                self.subscriberThread.client,
+                self.subscriberThread.nodes,
+                self.subscriberThread.effectors,
+                self.subscriberThread.devices_dict
+            )
             localizationTimer.start()
             time.sleep(1)
