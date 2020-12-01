@@ -1,5 +1,7 @@
 import itertools
 from enum import Enum
+import datetime
+from statistics import mean
 
 import paho.mqtt.client as mqtt
 
@@ -9,6 +11,10 @@ It will compute the position and communicate it accordingly.
 '''
 class Localization:
 
+    def rssiThreshold(self):
+        return -65
+    def timeThreshold(self):
+        return 5  # 10s expressed in ms
     def getType(self):
         pass
     def topic(self):
@@ -32,8 +38,16 @@ class NeighboursLocalization(Localization):
         active_devices = [device for device in devices if "status" in devices_dict[device] and devices_dict[device]["status"] == Status.NAVIGATING]
         messages = []
         for node, device in itertools.product(*[nodes, active_devices]):
-            # localization: node is close if threshold is less than -80
-            close = 1 if device in devices_dict and node.mac in devices_dict[device] and (sum(list(devices_dict[device][node.mac])) / len(devices_dict[device][node.mac])) > -60 else 0
+            # check values that do not differ much in time
+            if device in devices_dict and node.mac in devices_dict[device]:
+                current_vals = list(devices_dict[device][node.mac])
+                recent_values = list(map(lambda x: x["value"], filter(
+                    lambda x: x["timestamp"] + datetime.timedelta(0, self.timeThreshold()) > datetime.datetime.now(),
+                    current_vals)))
+            else:
+                recent_values = []
+            # localization: node is close if threshold is greater than <rssiThreshold>
+            close = 1 if len(recent_values) > 0 and mean(recent_values) > self.rssiThreshold() else 0
             messages.append("{}${}${}".format(node.mac, device, close))
         return messages
     def getType(self):
@@ -46,15 +60,18 @@ class NodeLocalization(Localization):
         # each pair (node, device) has a message of the form: (node, device, is_close)
         effectors, nodes, devices, devices_dict = kwargs["effectors"], kwargs["nodes"].nodes, kwargs["devices"], kwargs["devices_dict"]
         # filtering: only in case the device is navigating we compute the localization
-        active_devices = [device for device in devices if devices_dict[device]["status"] == Status.NAVIGATING]
-        messages = []
         active_devices = [device for device in devices if
                           "status" in devices_dict[device] and devices_dict[device]["status"] == Status.NAVIGATING]
         messages = []
         for node, device in itertools.product(*[nodes, active_devices]):
-            # localization: node is close if threshold is less than -80
-            close = 1 if device in devices_dict and node.mac in devices_dict[device] and (
-                        sum(list(devices_dict[device][node.mac])) / len(devices_dict[device][node.mac])) > -60 else 0
+            # check values that do not differ much in time
+            if device in devices_dict and node.mac in devices_dict[device]:
+                current_vals = list(devices_dict[device][node.mac])
+                recent_values = list(map(lambda x: x["value"], filter(lambda x: x["timestamp"] + datetime.timedelta(0, self.timeThreshold()) > datetime.datetime.now(), current_vals)))
+            else:
+                recent_values = []
+            # localization: node is close if threshold is greater than <rssiThreshold>
+            close = 1 if len(recent_values) > 0 and mean(recent_values) > self.rssiThreshold() else 0
             # then, we activate the effectors that are close to it
             effectors_to_activate = effectors.activate_effectors(node)
             for effector in effectors_to_activate:
