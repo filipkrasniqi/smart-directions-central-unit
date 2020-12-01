@@ -14,6 +14,8 @@ from localization.localization_thread import LocalizationTimer
 from map.elements.effector import Effectors
 from map.elements.nodes import Nodes
 
+import datetime
+
 BROKER_IP = "test.mosquitto.org"    # "192.168.1.151" # my laptop
 
 class MQTTSubscriber(LogThread):
@@ -50,7 +52,7 @@ class MQTTSubscriber(LogThread):
             self.devices_dict[key] = {}
         for origin in self.nodes.nodes:
             if origin.mac not in self.devices_dict[key]:
-                self.devices_dict[key][origin.mac] = collections.deque(self.QUEUE_LENGTH * [-100], self.QUEUE_LENGTH)
+                self.devices_dict[key][origin.mac] = collections.deque(self.QUEUE_LENGTH * [{"timestamp": datetime.datetime.now(), "value": -100}], self.QUEUE_LENGTH)
         self.devices_dict[key]["status"] = Status.NAVIGATING
 
     def on_deactivate(self, client, userdata, msg):
@@ -83,22 +85,19 @@ class MQTTSubscriber(LogThread):
                 origin, mac, rssi = splits
                 origin, mac = origin.lower()[2:], mac.lower()
                 key = mac
-            # checking that node exists
-            if origin in [node.mac.lower() for node in self.nodes.nodes]:
-                rssi = rssi[:-1]    # removing \n added by c++ code to have char*
-                # here I am adding the devices
-                if mac not in self.devices_dict:
-                    self.devices_dict[key] = {}
-                if origin not in self.devices_dict[key]:
-                    self.devices_dict[key]["status"] = Status.TO_INIT
-                    self.devices_dict[key][origin] = collections.deque(self.QUEUE_LENGTH * [-100], self.QUEUE_LENGTH)  # by default they are set to 0
-                try:
-                    rssi = int(rssi)
-                    self.devices_dict[key][origin].append(rssi)
-                except:
-                    self.errorLog("Unable to parse")
-            else:
-                self.log("Unknown device communicating")
+            # checking that it actually exists
+            if key in self.devices_dict:
+                # checking that node exists
+                if origin in [node.mac.lower() for node in self.nodes.nodes]:
+                    rssi = rssi[:-1]    # removing \n added by c++ code to have char*
+                    # finally adding rssi
+                    try:
+                        rssi = int(rssi)
+                        self.devices_dict[key][origin].append({"timestamp": datetime.datetime.now(), "value": rssi})
+                    except:
+                        self.errorLog("Unable to parse")
+                else:
+                    self.log("Unknown device communicating")
         else:
             self.errorLog("Unable to split")
 
