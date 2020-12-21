@@ -26,5 +26,3 @@ if __name__ == "__main__":
     filtered_effectors_1 = effectors.activate_effectors(nodes.nodes[0])
     filtered_effectors_2 = effectors.activate_effectors(nodes.nodes[1])
     filtered_effectors_3 = effectors.activate_effectors(nodes.nodes[2])
-
-    # TODO impostare ora i nodi e vedere se si attivano correttamente

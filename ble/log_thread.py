@@ -10,4 +10,4 @@ class LogThread(threading.Thread):
     def log(self, msg):
         print("{} @ {}: {}".format(self.name, time.ctime(time.time()).split(" ")[3], msg))
     def errorLog(self, err):
-        print("ERROR: {} @ {}: {}".format(self.name, time.ctime(time.time()).split(" ")[3], msg))
+        print("ERROR: {} @ {}: {}".format(self.name, time.ctime(time.time()).split(" ")[3], err))

@@ -1,7 +1,4 @@
-from map.elements.node import Node
 from map.elements.position import Position
-import numpy as np
-import geopy
 import geopy.distance as distance
 
 THRESHOLD_DISTANCE = 1  # meters s.t. I activate the effectors
