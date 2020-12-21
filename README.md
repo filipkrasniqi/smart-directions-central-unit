@@ -29,8 +29,19 @@ Communication among brain, devices, anchors and effectors is done with MQTT. A l
 - **ble/effectors/activate**: consistent with the current implementation of the localization system. The message is of the form: <MAC_EFFECTOR>$<DEVICE_ID>$<SHOW/NOT_SHOW>. Brain publishes a message for each pair (effector, device) to tell which of them are actually active. It will be the effector that will toggle show / not show depending on the payload.
 
 ## Code
-### Execution
-You should run the [brain/main.py](https://github.com/filipkrasniqi/smart-directions-subscriber/blob/master/brain/brain.py).
 
 ### Map information
-The map is loaded from the [assets/](https://github.com/filipkrasniqi/smart-directions-subscriber/tree/master/assets) folder.
+The map is loaded from the [assets/](https://github.com/filipkrasniqi/smart-directions-subscriber/tree/master/assets) directory. The files are mapped with Python classes in the [map/](https://github.com/filipkrasniqi/smart-directions-subscriber/tree/master/map/elements) directory. [Parser](https://github.com/filipkrasniqi/smart-directions-subscriber/blob/master/utils/parser.py) class handles parsing.
+
+### Execution
+You should run the [brain/main.py](https://github.com/filipkrasniqi/smart-directions-subscriber/blob/master/brain/brain.py). This code will run the MQTTSubscriber thread, that initializes MQTT stuff (connection, subscribing to topics) and starts the [localization timer](https://github.com/filipkrasniqi/smart-directions-subscriber/blob/master/localization/localization_thread.py), whose duty is to communicate with the effectors about the devices localization.
+
+### Data collection
+Data are stored in the MQTTSubscriber class using a Dictionary data structure. First-level keys are the IDs of the sniffed devices, the values are a second-level dictionary with:
+- for key "status", a value INACTIVE / NAVIGATING, depending on whether the corresponding device required to use the system
+- MAC of the anchors as keys and a queue of fixed size, containing as value a third-level dictionary of the format:
+  - for key "value" the collected RSSI
+  - for key "timestamp", the datetime of collection of that information. Useful in case the device stops communicating, otherwise we can't discriminate "zombie devices" (i.e., those that didn't deactivate).
+
+### Localization
+To allow more versatility in case we change the localization method, the abstract [Localization](https://github.com/filipkrasniqi/smart-directions-subscriber/blob/master/localization/localization.py) class refers to a generic localization method. Then, the [localization timer](https://github.com/filipkrasniqi/smart-directions-subscriber/blob/master/localization/localization_thread.py) will work accordingly to the instance of the Localization class. This means that to add a new way of performing localization with the collected data from the anchors one should add a new inherited class of Localization, reimplementing accordingly the topic where to public and how to build the message.
