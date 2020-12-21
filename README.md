@@ -16,13 +16,11 @@ We use [paho-mqtt](https://pypi.org/project/paho-mqtt/) to connect the MQTT clie
 Communication among brain, devices, anchors and effectors is done with MQTT. A list of the topics with payload info follows.
 
 ### Anchors
-- **ble/rssi**: each anchor sends a message of the form <MAC_ADDRESS_RBERRY_PI>$<SNIFFED_MAC_ADDRESS>$<RSSI_VAL>. The brain will store the information associating it to a device. Anchors are not aware of the current activated devices, so they will send rssi values for any sniffed device, regardless of whether such a device is actually using the system (i.e., it is currently active) or not. For navigation purposes, we should add the destination information (TODO); to do that, we wait for a proper definition of both the map and of the effectors.
+- **ble/rssi**: each anchor sends a message of the form <MAC_ADDRESS_RBERRY_PI>$<SNIFFED_MAC_ADDRESS>$<RSSI_VAL>. The brain will store the information associating it to a device. Anchors are not aware of the current activated devices, so they will send rssi values for any sniffed device, regardless of whether such a device is actually using the system (i.e., it is currently active) or not. For navigation purposes, we should add the destination information; to do that, we wait for a proper definition of both the map and of the effectors.
 
 ### Devices
 - **ble/activate**: device sends a message with payload = <ID> to the brain. Once that is subscribed, the brain will consider this device as one that is moving towards a destination (status of the device: INACTIVE -> NAVIGATING).
 - **ble/deactivate**: device is considered no more navigating (status of the device: NAVIGATING -> INACTIVE).
-  
-(TODO: we should authenticate as we did for parking, especially in this part where sensible data are used (location))
   
 ### Effectors
 - **ble/neighbours**: previous implementation. Brain was communicating to active devices the closest node to them.
@@ -45,3 +43,9 @@ Data are stored in the MQTTSubscriber class using a Dictionary data structure. F
 
 ### Localization
 To allow more versatility in case we change the localization method, the abstract [Localization](https://github.com/filipkrasniqi/smart-directions-subscriber/blob/master/localization/localization.py) class refers to a generic localization method. Then, the [localization timer](https://github.com/filipkrasniqi/smart-directions-subscriber/blob/master/localization/localization_thread.py) will work accordingly to the instance of the Localization class. This means that to add a new way of performing localization with the collected data from the anchors one should add a new inherited class of Localization, reimplementing accordingly the topic where to public and how to build the message.
+
+## Short term TODOs
+- topic update
+- connection to custom broker
+- handling permissions with different users for MQTT
+- add destination of device when activating it
