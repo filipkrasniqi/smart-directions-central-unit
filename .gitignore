@@ -1,2 +1,12 @@
 venv/
 .idea/
+assets/map-v1/*
+map/ui/frame/__pycache__/
+
+map/elements/planimetry/__pycache__/
+
+map/elements/__pycache__/
+
+*.docx
+
+utils/__pycache__/

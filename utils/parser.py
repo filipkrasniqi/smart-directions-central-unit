@@ -2,6 +2,9 @@ from map.elements.effector import Effectors, Effector
 from map.elements.node import Node
 from map.elements.nodes import Nodes
 import re
+import pickle
+
+from map.elements.planimetry.point import Point3D
 
 patt = re.compile("[^\t]+")
 
@@ -9,6 +12,49 @@ class Parser:
     class __Parser:
         def __init__(self, data_dir):
             self.data_dir = data_dir
+
+        '''
+        Read so far updated buildings
+        '''
+        def read_buildings(self):
+            try:
+                with open("{}buildings.pkl".format(self.data_dir), 'rb') as file:
+                        buildings = pickle.load(file)
+            except:
+                buildings = []
+            return buildings
+
+        '''
+        Update buildings list
+        '''
+        def write_buildings(self, buildings):
+            with open("{}buildings.pkl".format(self.data_dir), 'wb') as file:
+                pickle.dump(buildings, file)
+
+        # TODO I should also validate the file
+        '''
+        Loads the 3D points associated to a building with discrimination of indoor and outdoor
+        '''
+        def read_points_from_txt(self, file_path = None, f = None):
+            assert file_path is not None or f is not None, "No file"
+            if f is None:
+                # file_path = "{}{}".format(file_path, "map-v1/points.txt")
+                f = open(file_path, 'r')
+            lines = f.readlines()
+            points_x, points_y, points_z, points_isIndoor, unique_z = [], [], [], [], []
+            # parse the file to have list of x, y, z vals
+            for line in lines:
+                vals = line.split(",")
+                x, y, z, r, g, b = float(vals[0]), float(vals[1]), float(vals[2]), int(vals[3]), int(vals[4]), int(
+                    vals[5])
+                points_x.append(x)
+                points_y.append(y)
+                points_z.append(z)
+                # currently we have colors to understand whether space is indoor or outdoor; r is 255 for indoor
+                points_isIndoor.append(r == 255)
+            points: list[Point3D] = [Point3D(x, y, z, isIndoor) for x, y, z, isIndoor in
+                                     zip(points_x, points_y, points_z, points_isIndoor)]
+            return points
 
         def parse_node(self, idx, node):
             # splits = node.split(r'\t+')

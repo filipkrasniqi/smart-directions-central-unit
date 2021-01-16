@@ -27,8 +27,6 @@ class MQTTSubscriber(LogThread):
 
     tl = Timeloop()
 
-    map_device_mac = {} # dictionary of the form: {ID: [mac1, ..., macN]}
-
     def on_connect(self, client, userdata, flags, rc):
         self.client.subscribe("ble/rssi")
         self.client.subscribe("ble/activate")
@@ -38,7 +36,8 @@ class MQTTSubscriber(LogThread):
         self.client.message_callback_add('ble/deactivate', self.on_deactivate)
 
     def on_activate(self, client, userdata, msg):
-        splits = str(msg.payload).split("$")    # TODO just need to know an ID
+        splits = str(msg.payload).split("$")    # TODO just need to know an ID for now;
+        # TODO we should also add the destination
         mac = splits[0][2:-1]
         if len(splits) <= 1:
             # key is the mac

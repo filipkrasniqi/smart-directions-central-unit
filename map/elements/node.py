@@ -1,3 +1,4 @@
+from map.elements.planimetry.point_type import PointType
 from map.elements.position import Position
 
 
@@ -6,3 +7,19 @@ class Node(Position):
         Position.__init__(self, latitude, longitude, name)
         self.idx = idx
         self.mac = mac.lower()
+
+    def getColor(self):
+        return [0, 255, 0]
+
+    def getSelectedColor(self):
+        return [128, 255, 0]
+
+    def getObjectType(self):
+        return PointType.ANCHOR
+
+    def getId(self):
+        return "ANCHOR_{}".format(self.idx)
+
+    def __str__(self):
+        position_str = Position.__str__(self)
+        return "{}\n{}".format(position_str, self.mac)
