@@ -74,6 +74,10 @@ class AddBuilding(tk.Toplevel):
         self.confirmFloor.grid(column=1, row=8)
         self.confirmFloor.configure(state="disabled")
 
+        self.loadBtn = tk.Button(self, text="Load home", fg="grey",
+                             command=self.buildHome)
+        self.loadBtn.grid(column=1, row=9)
+
         if self.isUpdate:
             self.enableButtons()
             self.updateUIWithBuildingInfo()
@@ -86,6 +90,13 @@ class AddBuilding(tk.Toplevel):
         self.master.toggle(enable=True)
         self.destroy()
 
+    def buildHome(self):
+        self.currentBuilding = Building()
+        self.currentFloor = 0
+        self.updateUIWithBuildingInfo()
+        self.enableButtons()
+        self.drawFloor()
+
     '''
     Listener on loading building from file.
     Opens UI to select files. Updates the UI if a proper file is provided with the new building.
@@ -94,7 +105,7 @@ class AddBuilding(tk.Toplevel):
         filename = filedialog.askopenfilename(initialdir = "/",title = "Select file",filetypes = [("Txt files", ".txt")])
         parser = Parser("").getInstance()
         points = parser.read_points_from_txt(filename)
-        self.currentBuilding = Building(self.id, 0, 0, points, "Nuovo edificio")
+        self.currentBuilding = Building(id=self.id, latitude=0, longitude=0, points=points, name="Nuovo edificio")
         self.currentFloor = 0
         self.updateUIWithBuildingInfo()
         self.enableButtons()
@@ -125,50 +136,51 @@ class AddBuilding(tk.Toplevel):
     def drawFloor(self):
         if self.currentBuilding is not None:
             matrixToDraw = self.currentBuilding.getFloor(self.currentFloor)
-            # TODO da cambiare quando ho immagini corrette ma è utile ora
-            matrixToDraw = matrixToDraw[:int(matrixToDraw.shape[0]/2), :int(matrixToDraw.shape[1]/2)]
+            if self.currentBuilding.id >= 0:
+                # TODO da cambiare quando ho immagini corrette ma è utile ora
+                matrixToDraw = matrixToDraw[:int(matrixToDraw.shape[0]/2), :int(matrixToDraw.shape[1]/2)]
 
             # building matrix depending on the cell value
-            matrixRGB = np.zeros((matrixToDraw.shape[0], matrixToDraw.shape[1], 3), dtype=np.uint8)
+            matrixRGB = np.zeros((matrixToDraw.shape[1], matrixToDraw.shape[0], 3), dtype=np.uint8)
             for i, row in enumerate(matrixToDraw):
                 for j, cell in enumerate(row):
                     if self.selectedObject is not None and i == self.selectedObject[0] and j == self.selectedObject[1]:
                         currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, i, j)
                         if PointType.isObject(currentSelectedObject):
                             currentObject = self.currentBuilding.getObjectAt(self.currentFloor, (i, j))
-                            matrixRGB[i, j] = currentObject.getSelectedColor()
+                            matrixRGB[j, i] = currentObject.getSelectedColor()
                         else:
-                            matrixRGB[i, j] = [255, 0, 255]
+                            matrixRGB[j, i] = [255, 0, 255]
                     else:
                         if not self.currentBuilding.isOccupied(i, j, self.currentFloor):
-                            matrixRGB[i,j] = [255, 128, 0] if cell == PointType.INDOOR else [0,191,255] if cell == PointType.OUTDOOR else [128,128,128]
+                            matrixRGB[j, i] = [255, 128, 0] if cell == PointType.INDOOR else [0,191,255] if cell == PointType.OUTDOOR else [128,128,128]
                         else:
                             currentObject = self.currentBuilding.getObjectAt(self.currentFloor, (i, j))
-                            matrixRGB[i, j] = currentObject.getColor()
+                            matrixRGB[j, i] = currentObject.getColor()
 
             # resizing the matrix for the canvas and adjusting the canvas
-            finalWidth = 1200
-            self.ratioUIMatrix = (finalWidth / float(matrixRGB.shape[1]))
-            self.hsize = int((float(matrixRGB.shape[0]) * float(self.ratioUIMatrix)))
-            self.canvas = tk.Canvas(self, width=finalWidth, height=self.hsize)
+            self.hsize = 1000
+            self.ratioUIMatrix = (self.hsize / float(matrixRGB.shape[0]))
+            self.finalWidth = int((float(matrixRGB.shape[1]) * float(self.ratioUIMatrix)))
+            self.canvas = tk.Canvas(self, width=self.finalWidth, height=self.hsize)
             self.canvas.grid(column=0, row=0, rowspan=8)
             # building the image and resizing it
             image = Image.fromarray(matrixRGB, 'RGB')
             self.matrix = matrixRGB
-            image = image.resize((finalWidth,self.hsize), Image.AFFINE)
+            image = image.resize((self.finalWidth,self.hsize), Image.AFFINE)
             photo = ImageTk.PhotoImage(image=image)
             self.canvas.create_image(0, 0, image=photo, anchor=tk.NW)
             # creating the grid in the canvas
             row, col = int(self.ratioUIMatrix), int(self.ratioUIMatrix)
-            while row < self.hsize or col < finalWidth:
+            while row < self.hsize or col < self.finalWidth:
                 if row < self.hsize:
-                    self.canvas.create_line(0, row, finalWidth, row)
+                    self.canvas.create_line(0, row, self.finalWidth, row)
                     row = int(row+self.ratioUIMatrix)
-                if col < finalWidth:
+                if col < self.finalWidth:
                     self.canvas.create_line(col, 0, col, self.hsize)
                     col = int(col+self.ratioUIMatrix)
             self.canvas.bind('<Button-1>', self.onCanvasClick)
-            self.canvas.bind('<Double-1>', self.onCanvasDoubleClick)
+            self.canvas.bind('<Button-2>', self.onCanvasDoubleClick)
             self.canvas.bind('<Motion>', self.onCanvasHover)
 
             self.canvas.mainloop()
@@ -195,10 +207,10 @@ class AddBuilding(tk.Toplevel):
     def onCanvasHover(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         xMatrix, yMatrix = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, yMatrix, xMatrix)
+        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, xMatrix, yMatrix)
 
         if PointType.isValid(currentSelectedObject) and PointType.isObject(currentSelectedObject):
-            currentObj = self.currentBuilding.getObjectAt(self.currentFloor, (yMatrix, xMatrix))
+            currentObj = self.currentBuilding.getObjectAt(self.currentFloor, (xMatrix, yMatrix))
             if self.tipWindow is None or self.tipWindow != currentObj.getId():
                 self.showTipWindow(currentObj.getId(), currentObj, x, y)
         else:
@@ -266,11 +278,11 @@ class AddBuilding(tk.Toplevel):
     def onCanvasDoubleClick(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         x, y = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, y, x)
+        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, x, y)
 
         if PointType.isValid(currentSelectedObject) and PointType.isObject(currentSelectedObject):
             self.selectedObject = None
-            objToEdit = self.currentBuilding.getObjectAt(self.currentFloor, (y, x))
+            objToEdit = self.currentBuilding.getObjectAt(self.currentFloor, (x, y))
             # open corresponding modal: effector, node, poi
             if currentSelectedObject == PointType.ANCHOR:
                 self.showEditNodeWindow(objToEdit)
@@ -300,17 +312,17 @@ class AddBuilding(tk.Toplevel):
     def onCanvasClick(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         x, y = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, y, x)
+        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, x, y)
 
         if PointType.isValid(currentSelectedObject):
             if PointType.isObject(currentSelectedObject):
-                self.selectedObject = (y, x)
+                self.selectedObject = (x, y)
             else:
                 if self.selectedObject is not None:
                     if PointType.isObject(currentSelectedObject):
-                        self.selectedObject = (y, x)
+                        self.selectedObject = (x, y)
                     else:
-                        self.currentBuilding.changeObjectPosition(self.currentFloor, self.selectedObject, (y, x))
+                        self.currentBuilding.changeObjectPosition(self.currentFloor, self.selectedObject, (x, y))
                         self.selectedObject = None
             self.drawFloor()
         else:

@@ -3,8 +3,8 @@ from map.elements.position import Position
 
 
 class Node(Position):
-    def __init__(self, idx, latitude, longitude, name, mac):
-        Position.__init__(self, latitude, longitude, name)
+    def __init__(self, idx, x, y, z, name, mac):
+        Position.__init__(self, x, y, z, name)
         self.idx = idx
         self.mac = mac.lower()
 

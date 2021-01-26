@@ -5,8 +5,8 @@ import geopy.distance as distance
 THRESHOLD_DISTANCE = 1  # meters s.t. I activate the effectors
 
 class Effector(Position):
-    def __init__(self, idx, latitude, longitude, name, mac):
-        Position.__init__(self, latitude, longitude, name)
+    def __init__(self, idx, x, y, z, name, mac):
+        Position.__init__(self, x, y, z, name)
         self.idx = idx
         self.mac = mac.lower()
 

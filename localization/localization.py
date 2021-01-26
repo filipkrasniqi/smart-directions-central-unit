@@ -5,6 +5,8 @@ from statistics import mean
 
 import paho.mqtt.client as mqtt
 
+from map.elements.effector import Effector
+
 '''
 Singleton instanced as such to apply a localization that depends on the mode.
 It will compute the position and communicate it accordingly.
@@ -12,25 +14,26 @@ It will compute the position and communicate it accordingly.
 class Localization:
 
     def rssiThreshold(self):
-        return -65
+        return -70
     def timeThreshold(self):
-        return 5  # 10s expressed in ms
+        return 1000  # 10s expressed in ms
     def getType(self):
         pass
-    def topic(self):
+    def topic(self, effector: Effector):
         pass
     def build_messages(self, **kwargs):
         pass
     def send(self, **kwargs):
         client = kwargs["client"]
-        for message in self.build_messages(**kwargs):
-            client.publish(self.topic(), message)
+        for effectorMessage in self.build_messages(**kwargs):
+            effector, message = effectorMessage
+            client.publish(self.topic(effector), message)
     def compute(self, mac_dict, mac, origin):
         pass
 
 class NeighboursLocalization(Localization):
-    def topic(self):
-        return "ble/neighbours"
+    def topic(self, effector):
+        return "directions/effector/neighbour/{}".format(effector.mac)
     def build_messages(self, **kwargs):
         # each pair (node, device) has a message of the form: (node, device, is_close)
         nodes, devices, devices_dict = kwargs["nodes"].nodes, kwargs["devices"], kwargs["devices_dict"]
@@ -48,14 +51,14 @@ class NeighboursLocalization(Localization):
                 recent_values = []
             # localization: node is close if threshold is greater than <rssiThreshold>
             close = 1 if len(recent_values) > 0 and mean(recent_values) > self.rssiThreshold() else 0
-            messages.append("{}${}${}".format(node.mac, device, close))
+            messages.append((node, "{}${}".format(device, close)))
         return messages
     def getType(self):
         return LocalizationType.NEIGHBOURS
 
 class NodeLocalization(Localization):
-    def topic(self):
-        return "ble/effectors/activate"
+    def topic(self, effector):
+        return "directions/effector/activate/{}".format(effector.mac)
     def build_messages(self, **kwargs):
         # each pair (node, device) has a message of the form: (node, device, is_close)
         effectors, nodes, devices, devices_dict = kwargs["effectors"], kwargs["nodes"].nodes, kwargs["devices"], kwargs["devices_dict"]
@@ -75,7 +78,7 @@ class NodeLocalization(Localization):
             # then, we activate the effectors that are close to it
             effectors_to_activate = effectors.activate_effectors(node)
             for effector in effectors_to_activate:
-                messages.append("{}${}${}".format(effector.mac, device, close))
+                messages.append((effector, "{}${}".format(device, close)))
         return messages
     def getType(self):
         return LocalizationType.NODE

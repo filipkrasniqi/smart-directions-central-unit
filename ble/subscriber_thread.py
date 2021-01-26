@@ -9,14 +9,14 @@ from timeloop import Timeloop
 
 import paho.mqtt.client as mqtt
 from ble.log_thread import LogThread
-from localization.localization import Status
+from localization.localization import Status, LocalizationType
 from localization.localization_thread import LocalizationTimer
 from map.elements.effector import Effectors
 from map.elements.nodes import Nodes
 
 import datetime
 
-BROKER_IP = "test.mosquitto.org"    # "192.168.1.151" # my laptop
+BROKER_IP = "80.211.69.17"    # "192.168.1.151" # my laptop
 
 class MQTTSubscriber(LogThread):
     client: mqtt.Client
@@ -24,28 +24,20 @@ class MQTTSubscriber(LogThread):
     QUEUE_LENGTH = 5
     nodes: Nodes
     effectors: Effectors
+    all_devs = set()
 
     tl = Timeloop()
 
     def on_connect(self, client, userdata, flags, rc):
-        self.client.subscribe("ble/rssi")
-        self.client.subscribe("ble/activate")
-        self.client.subscribe("ble/deactivate")
-        self.client.message_callback_add('ble/rssi', self.on_rssi_received)
-        self.client.message_callback_add('ble/activate', self.on_activate)
-        self.client.message_callback_add('ble/deactivate', self.on_deactivate)
+        self.client.subscribe("directions/anchor/proximity/#")
+        self.client.subscribe("directions/device/activate/#")
+        self.client.subscribe("directions/device/deactivate/#")
+        self.client.message_callback_add('directions/anchor/proximity/#', self.on_rssi_received)
+        self.client.message_callback_add('directions/device/activate/#', self.on_activate)
+        self.client.message_callback_add('directions/device/deactivate/#', self.on_deactivate)
 
     def on_activate(self, client, userdata, msg):
-        splits = str(msg.payload).split("$")    # TODO just need to know an ID for now;
-        # TODO we should also add the destination
-        mac = splits[0][2:-1]
-        if len(splits) <= 1:
-            # key is the mac
-            key = mac
-        else:
-            # key is the device id
-            device_id = splits[1]
-            key = device_id
+        key = msg.topic.split("/")[-1].lower()
 
         if key not in self.devices_dict:
             self.devices_dict[key] = {}
@@ -55,15 +47,7 @@ class MQTTSubscriber(LogThread):
         self.devices_dict[key]["status"] = Status.NAVIGATING
 
     def on_deactivate(self, client, userdata, msg):
-        splits = str(msg.payload).split("$")
-        mac = splits[0][2:-1]
-        if len(splits) <= 1:
-            # key is the mac
-            key = mac
-        else:
-            # key is the device ID
-            device_id = splits[1]
-            key = device_id
+        key = msg.topic.split("/")[-1].lower()
         if key in self.devices_dict:
             self.devices_dict[key]["status"] = Status.INACTIVE
 
@@ -75,16 +59,20 @@ class MQTTSubscriber(LogThread):
 
     def on_rssi_received(self, client, userdata, msg):
         splits = str(msg.payload).split("$")
-        if len(splits) >= 3:
-            if len(splits) == 4:
-                origin, mac, rssi, device_id = splits
-                origin, mac = origin.lower()[2:], mac.lower()
+        origin = msg.topic.split("/")[-1]
+        if len(splits) >= 2:
+            if len(splits) == 3:
+                mac, rssi, device_id = splits
+                mac = mac.lower()
                 key = device_id.lower()
             else:
-                origin, mac, rssi = splits
-                origin, mac = origin.lower()[2:], mac.lower()
+                mac, rssi = splits
+                mac = mac.lower()[2:]
                 key = mac
             # checking that it actually exists
+            # f8:01:61:c9:07:01
+            if abs(int( rssi[:-1])) < 70:
+                print(key)
             if key in self.devices_dict:
                 # checking that node exists
                 if origin in [node.mac.lower() for node in self.nodes.nodes]:
@@ -105,9 +93,10 @@ class MQTTSubscriber(LogThread):
 
     def run_timer(self):
         while True:
-            localizationTimer = LocalizationTimer(self.client, self.nodes, self.effectors, self.devices_dict)
+            localizationTimer = LocalizationTimer(self.client, self.nodes, self.effectors, self.devices_dict, \
+                                                  localizationType=LocalizationType.NODE)
             localizationTimer.start()
-            time.sleep(1)
+            time.sleep(2)
             # TODO here it is the right place where to clean up a bit
 
     def __init__(self, name, nodes, effectors):
@@ -115,11 +104,9 @@ class MQTTSubscriber(LogThread):
 
         # Initializing mqtt protocol
         self.client = mqtt.Client()
+        self.client.username_pw_set(username="brain", password="brain")
 
-        self.client.tls_set(ca_certs="../keys/mosquitto.org.crt", certfile="../keys/client.crt",
-                       keyfile="../keys/client.key")
-
-        self.client.connect(BROKER_IP, 8884, 60)
+        self.client.connect(BROKER_IP, 1884, 60)
 
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
