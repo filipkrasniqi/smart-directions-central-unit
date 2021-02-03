@@ -41,19 +41,18 @@ class Parser:
                 # file_path = "{}{}".format(file_path, "map-v1/points.txt")
                 f = open(file_path, 'r')
             lines = f.readlines()
-            points_x, points_y, points_z, points_isIndoor, unique_z = [], [], [], [], []
+            points: list[Point3D] = []
             # parse the file to have list of x, y, z vals
             for line in lines:
                 vals = line.split(",")
                 x, y, z, r, g, b = float(vals[0]), float(vals[1]), float(vals[2]), int(vals[3]), int(vals[4]), int(
                     vals[5])
-                points_x.append(x)
-                points_y.append(y)
-                points_z.append(z)
-                # currently we have colors to understand whether space is indoor or outdoor; r is 255 for indoor
-                points_isIndoor.append(r == 255)
-            points: list[Point3D] = [Point3D(x, y, z, isIndoor) for x, y, z, isIndoor in
-                                     zip(points_x, points_y, points_z, points_isIndoor)]
+                isIndoor = (r == 255)
+                isLectureRoom, isWideArea, isHallway, isStair, isToilet, isLift = \
+                    (g == 0), (g == 30), (g == 60), (g == 90), (g == 120), (g == 150)
+                # we are currently not using all these info: only stair and indoor
+                # TODO it would be great to cluster the rooms and init them with a PoI
+                points.append(Point3D.buildPoint(x, y, z, isIndoor, isLectureRoom, isWideArea, isHallway, isStair, isToilet, isLift))
             return points
 
         def parse_node(self, idx, node):
