@@ -1,18 +1,22 @@
 import itertools
 from enum import Enum, IntEnum
 
+from scipy import ndimage
+
 from map.elements.effector import Effectors, Effector
 from map.elements.node import Node
 from map.elements.nodes import Nodes
-from map.elements.planimetry.point import Point3D
+from map.elements.planimetry.point import Point3D, StairPoint3D, LiftPoint3D, ConnectionPoint3D
 from map.elements.planimetry.point_type import PointType
 from map.elements.poi import PoI, PoIs
 from map.elements.position import Position
 
 import bisect
 import numpy as np
+import scipy
 
-# TODO gestire multi livello
+from scipy.spatial import distance_matrix
+
 class Building(Position):
     '''
     Each floor has its own SdR, that in a 2x2 matrix it would be:
@@ -26,6 +30,8 @@ class Building(Position):
         Position.__init__(self, x, y, z, name)
         # init everything: floors, sort points
         self.routingTable = {}
+        self.connections, self.floors, self.floorsObjects, self.anchors, self.effectors, self.pois = \
+            None, None, None, None, None, None
         self.__initBuilding(points)
 
     '''
@@ -45,6 +51,162 @@ class Building(Position):
 
         return min(x_arr), max(x_arr), min(y_arr), max(y_arr), min(z_arr), max(z_arr)
 
+    def searchPoints(self, x, y, floor):
+        points = [p for p in self.points if p.x == x and p.y == y and p.floor == floor]
+        assert len(points) > 0, 'Point not found'
+        return points
+
+    def searchPoint(self, x, y, floor, className = None):
+        points = self.searchPoints(x, y, floor)
+        if className is not None:
+            points = list(filter(lambda x: isinstance(x, className), points))
+        return None if len(points) <= 0 else points[0]
+
+    def getPoint(self, x, y, floor):
+        return self.pointsDict[Point3D.computeHash(x, y, floor)]
+
+    '''
+    Given a type of search (STAIR or LIFT)
+    Algorithm sets cells in connections as PIVOT by finding the center of mass of each group.
+    That will be the point that is checked for shortest path when searching a connection
+    '''
+    def __assignConnectionsPivot(self, typeToSearch: PointType, z_given_floor = None):
+        assert self.connections is not None, "First init building"
+        assert PointType.isConnection(typeToSearch), "Connection point required"
+        if z_given_floor is None:
+            z_given_floor = self.dictZGivenFloor()
+        typeToSet = PointType.STAIR_PIVOT if typeToSearch == PointType.STAIR else PointType.LIFT_PIVOT
+        className = StairPoint3D if typeToSearch == PointType.STAIR else LiftPoint3D
+
+        for floor in range(self.connections.shape[0]):
+            connectionPoints = self.connections[floor] == typeToSearch
+            # we compute the groups
+            uniqueGroupsIdxs, _ = ndimage.label(connectionPoints)
+            size = np.bincount(uniqueGroupsIdxs.ravel())
+            if len(size) > 1:   # true if I have something on this floor
+                biggestIdx = uniqueGroupsIdxs.max()
+                for labelNum in range(biggestIdx):
+                    clumpVal = labelNum+1
+                    # finding approximate center of max
+                    centerOfMass = ndimage.center_of_mass(connectionPoints, uniqueGroupsIdxs, clumpVal)
+                    # to int
+                    centerOfMass = (int(centerOfMass[0]), int(centerOfMass[1]))
+                    # computing actual distances from the CM.
+                    # We start by defining the distance to non-stair values: +inf
+                    dm = np.ones(shape=connectionPoints.shape)*np.inf
+                    dm[connectionPoints] = 1
+                    # distancesFromCM will contain the distances from each point of the map wrt the CoM
+                    distancesFromCM = np.array([abs(int(cellPos/connectionPoints.shape[1])-centerOfMass[0])+abs(int(cellPos%connectionPoints.shape[1])-centerOfMass[1]) for cellPos in range(connectionPoints.shape[0]*connectionPoints.shape[1])]).reshape(connectionPoints.shape)
+                    # finally we compute the intersection (inf*k=inf)
+                    dm = np.multiply(dm, distancesFromCM)
+                    # and we get the coordinates of a valid CoM (closest stair point)
+                    centerOfMass = np.unravel_index(dm.argmin(), dm.shape)
+                    self.connections[floor][centerOfMass] = typeToSet
+                    pivotPoint = self.searchPoint(centerOfMass[0], centerOfMass[1], floor, className)
+
+                    # for each point of the uniqueGroup, assign the pivot point
+                    for x in range(uniqueGroupsIdxs.shape[0]):
+                        for y in range(uniqueGroupsIdxs.shape[1]):
+                            if uniqueGroupsIdxs[x, y] == clumpVal:
+                                point = self.searchPoint(x, y, floor, className)
+                                point.setPivot(pivotPoint)
+
+    '''
+    Duplicate points are removed.
+    They may appear due to stairs being in between floors.
+    '''
+    def __clearDuplicatePoints(self, connectionPoints = None):
+        if connectionPoints is None:
+            connectionPoints = list(filter(lambda x: x.isConnection(), self.points))
+        hashVals = {}
+        for p in connectionPoints:
+            hashVals.update({p.__hash__(): True})
+        # then I check, among the non-connection points, the duplicates, and I remove them
+        for p in self.points:
+            if p in hashVals and not p.isConnection():
+                self.points.remove(p)
+            hashVals.update({p.__hash__(): True})
+
+    '''
+    Returns z values associated to any floor.
+    It does that by taking all distinct z values related to non connection points
+    '''
+    def floorUniqueZ(self):
+        nonConnectionPoints = list(filter(lambda x: not x.isConnection(), self.points))
+        # init the floors with the Z values. The floor is a transformation into discrete values of Z
+        # computing the floors for those points that are not connection ones
+        unique_z = set()
+        for p in nonConnectionPoints:
+            unique_z.add(p.z)
+        unique_z = list(unique_z)
+        unique_z.sort()
+        return unique_z
+
+    '''
+    Returns a dict having floor value as key pointing at the corresponding z
+    '''
+    def dictZGivenFloor(self):
+        unique_z = self.floorUniqueZ()
+        return {i: z for i, z in enumerate(unique_z)}, unique_z
+
+    '''
+    Returns a dict having Z value as key pointing at the corresponding floor
+    '''
+    def dictFloorGivenZ(self):
+        unique_z = self.floorUniqueZ()
+        return {z: i for i, z in enumerate(unique_z)}, unique_z
+
+    '''
+    For each stair pivot, computes where it brings
+    '''
+    def __computeStairConnections(self, z_given_floor = None):
+        if z_given_floor is None:
+            z_given_floor = self.dictZGivenFloor()
+
+        # find the corresponding end points for each connection point
+        for floor in range(self.numFloors-1):
+            minZ, maxZ = z_given_floor[floor], z_given_floor[floor+1]
+            point_between_floors = list(filter(lambda p: minZ < p.z < maxZ, self.points))
+            # consider them as flattened to the floor and compute the intersection
+            # so build a matrix with them
+            stairsFlattened = np.zeros(shape=self.floors[0].shape)
+            for p in point_between_floors:
+                stairsFlattened[p.x, p.y] = 1
+            # compute groups
+            connectionPoints = stairsFlattened == 1
+            # we compute the groups
+            uniqueGroupsIdxs, _ = ndimage.label(connectionPoints)
+            size = np.bincount(uniqueGroupsIdxs.ravel())
+
+            if len(size) > 1:   # true if I have something on this floor
+                biggestIdx = uniqueGroupsIdxs.max()
+                for labelNum in range(biggestIdx):
+                    clumpVal = labelNum+1
+                    group = uniqueGroupsIdxs == clumpVal
+                    conn_1, conn_2 = self.connections[floor] > 0, self.connections[floor+1] > 0
+                    intersection_1, intersection_2 = \
+                        np.multiply(group, conn_1), np.multiply(group, conn_2)
+                    numIntersections1, numIntersections2 = intersection_1.sum(), intersection_2.sum()
+                    if numIntersections1 > 0 and numIntersections2 > 0:
+                        xVals, yVals = np.where(intersection_1 > 0)
+                        # find one point of intersection having the pivot
+                        i, pivotDown = 0, None
+                        while i < len(xVals) and pivotDown is None:
+                            x, y = xVals[i], yVals[i]
+                            pivotDown = self.searchPoint(x, y, floor, StairPoint3D)
+                            i += 1
+                        assert pivotDown is not None, "PIVOT NON ESISTE!!!"
+                        i, pivotUp = 0, None
+                        xVals, yVals = np.where(intersection_2 > 0)
+                        while i < len(xVals) and pivotUp is None:
+                            x, y = xVals[i], yVals[i]
+                            pivotUp = self.searchPoint(x, y, floor+1, StairPoint3D)
+                            i += 1
+                        assert pivotUp is not None, "PIVOT NON ESISTE!!!"
+                        pivotDown.setPointUp(pivotUp.getPivot())
+                        pivotUp.setPointDown(pivotDown.getPivot())
+
+
     '''
     Init the building given the points.
     The output would be a list of floor obj (one for each floor), i.e. matrices having walkable / non-walkable points
@@ -53,28 +215,45 @@ class Building(Position):
         # sort points by (x, y, z). To do that, I need to normalize the value, so that I know how to weight differently
         # the coordinates
         self.points: list[Point3D] = points
+        # round all vals of points
+        for p in self.points:
+            p.x, p.y, p.z = round(p.x, 2), round(p.y, 2), round(p.z, 2)
         self.numFloors = 0
         # min and max for normalization
         minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals()
         getDeltaOrZero = lambda x1, x2: 1 if x1 == x2 else x1-x2
         deltaX, deltaY, deltaZ = getDeltaOrZero(maxX, minX), getDeltaOrZero(maxY, minY), getDeltaOrZero(maxZ, minZ)
+        # first: remove the negative values by summing to each the min val if negative
+        for p in self.points:
+            if minX < 0:
+                p.x += abs(minX)
+            if minY < 0:
+                p.y += abs(minY)
+            if minZ < 0:
+                p.z += abs(minZ)
+        # recomputation of min, max vals
+        minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals()
+
         # normalizing points in the range [0, 1]
         for p in self.points:
             p.x, p.y, p.z = (p.x - minX) / deltaX, \
                             (p.y - minY) / deltaY, \
-                            (p.z - minZ) / deltaZ
+                            round((p.z - minZ) / deltaZ, 2)
+
+        # filter out points that refer to stairs / lifts: they are not relevant
+        nonConnectionPoints = list(filter(lambda x: not x.isConnection(), self.points))
+        # init the floors with the Z values. The floor is a transformation into discrete values of Z
+        # computing the floors for those points that are not connection ones
+        floor_given_z, unique_z = self.dictFloorGivenZ()
+        z_given_floor, _ = self.dictZGivenFloor()
+
+        for p in nonConnectionPoints:
+            p.floor = floor_given_z[p.z]
 
         # sort points by (in order): x, y, z with a weight to be minimized computed as: x + 10*y + 100*z,
         # being x, y, z in the range [0, 1]
-        self.points.sort(key=lambda p: p.x + p.y * 10 + p.z * 100)
-        # init the floors with the Z values. The floor is a transformation into discrete values of Z
-        current_floor = -1
-        previous = -1
-        for p in self.points:
-            if previous != p.z:
-                current_floor += 1
-            p.floor, previous = current_floor, p.z
-        self.numFloors = current_floor + 1
+        self.points.sort(key=lambda p: p.__hash__())
+        self.numFloors = len(unique_z)
         # I compute the same transformation for X and Y, so that x € [0, W], y € [0, H]
         unique_x, unique_y, currentX, currentY = [], [], -1, -1
         for p in self.points:
@@ -89,19 +268,75 @@ class Building(Position):
             if idx_x < 0:
                 bisect.insort(unique_x, p.x)
                 currentX += 1
-                idx_x = currentX
             if idx_y < 0:
                 bisect.insort(unique_y, p.y)
                 currentY += 1
-                idx_y = currentY
-            p.x, p.y = idx_x, idx_y
-        # build list of matrices: WxH for each floor
+            # updating x and y with corresponding value of index; we change the SdR to natural numbers
+
+        # sort points
+        for p in self.points:
+            p.x, p.y = unique_x.index(p.x), unique_y.index(p.y)
+
         minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals()
         width, height = (maxX - minX) + 1, (maxY - minY) + 1
+        # build list of matrices: WxH for each floor
         # self.floors is a list of masks defining whether it is indoor, outdoor or invalid
         self.floors = np.zeros(shape=(self.numFloors, width, height))
-        for p in self.points:
+        for p in nonConnectionPoints:
             self.floors[p.floor, p.x, p.y] = PointType.INDOOR.value if p.isIndoor else PointType.OUTDOOR
+            p.drawn = True
+
+        self.connections = np.zeros(shape=(self.numFloors, width, height))
+        connectionPoints = list(filter(lambda x: x.isConnection(), self.points))
+        stairPoints = list(filter(lambda x: x.isStair(), connectionPoints))
+        unique_zStairs = list(set([p.z for p in stairPoints]))
+        unique_zStairs.sort()
+        dictStairZFloors = {}
+        isUpDictStair = {}
+
+        for floor, zPoint in enumerate(unique_z):
+            diffsWithSign = [(round(abs(zPoint - zStairPoint), 3), zPoint < zStairPoint) for zStairPoint in unique_zStairs]   # second attribute tells whether it's going down or up
+            absDiffs, isUpList = [d[0] for d in diffsWithSign], [d[1] for d in diffsWithSign]
+            THRESHOLD = 0.1
+            validStairPoints = [i for i, d in enumerate(absDiffs) if d < THRESHOLD]
+            for idx in validStairPoints:
+                dictStairZFloors[unique_zStairs[idx]] = floor
+                isUpDictStair[unique_zStairs[idx]] = isUpList[idx]
+
+        for p in connectionPoints:
+            added = False
+            # this should be the lifts...
+            if p.z in floor_given_z:
+                p.floor = floor_given_z[p.z]
+                added = True
+            # ... and this the stairs
+            if not added and p.z in dictStairZFloors:
+                p.floor = dictStairZFloors[p.z]
+                if p.isStair():
+                    p.setNextFloor(isUpDictStair[p.z])
+
+        for p in connectionPoints:
+            if p.floor >= 0:
+                self.connections[p.floor, p.x, p.y] = p.pointType()
+                p.drawn = True
+
+        assert(len([p for p in self.points if not p.drawn]) == 0, "Some points are not drawn!")
+
+        # create points dict ONLY for points with floor value: so non connections point and connections point on floor
+        self.pointsDict = {}
+        for p in self.points:
+            self.pointsDict.update({p.__hash__(): p})
+
+        # I find the pivot points and assign to the other stair / lift points the corresponding
+        self.__assignConnectionsPivot(PointType.STAIR)
+        self.__assignConnectionsPivot(PointType.LIFT)
+
+        # clear duplicate points (due to connections)
+        self.__clearDuplicatePoints(connectionPoints)
+
+        # compute, for each stair pivot, the connection to other floors
+        self.__computeStairConnections(z_given_floor)
+
         # self.floorsObjects is a list of masks defining, for the valid places, the objects (anchors, effectors, point of interest)
         self.floorsObjects = np.zeros(shape=(self.numFloors, width, height))
         self.anchors, self.effectors, self.pois = [Nodes() for _ in range(self.numFloors)],\
@@ -119,7 +354,7 @@ class Building(Position):
         closest anchor in the path (2*).
     Last thing we need to compute, is the direction to communicate.
     '''
-    def computeOfflineMap(self):
+    def computeOfflineMapForFloor(self):
         # for each poi, compute the DISTANCE MATRIX (1*)
         for level, poisAtLevel in enumerate(self.pois):
             poisAtLevel.updateDistanceMatrix(self.floors, level)
@@ -139,7 +374,6 @@ class Building(Position):
         # now we have a routing table of the form: <key> = anchor -> <value> = anchor | poi
         # TODO goal would be to build another routing table that has: <key> = (anchor, poi) -> <value> = <direction> (LEFT, TOP, RIGHT, BOTTOM)\
         #  but this information depends too much on the orientation of the user, thus it's better to think about this
-
 
     '''
     Given (x, y) 
@@ -161,10 +395,16 @@ class Building(Position):
         return effectorToActivate
 
     '''
-    Return the indoor / outdoor mask for 
+    Return the indoor / outdoor mask for the points indoor / outdoor
     '''
     def getFloor(self, idx):
         return self.floors[idx]
+
+    '''
+    Return the indoor / outdoor mask for the connections
+    '''
+    def getConnectionsMatrix(self, idx):
+        return self.connections[idx]
 
     '''
     Return whether a specific cell is valid (i.e., is an indoor / outdoor space or not)
@@ -178,11 +418,14 @@ class Building(Position):
     def getId(self):
         return self.id
 
+    def __hash__(self):
+        return self.getId()
+
     '''
     Returns an object given the position in terms of [x, y]
     '''
     def getObjectAt(self, floor, position):
-        objectType = self.getObjectTypeAt(floor, position[0], position[1])
+        objectType = self.getObjectTypeAt(position[0], position[1], floor)
         if objectType == PointType.ANCHOR:
             toChange = self.anchors[floor]
         elif objectType == PointType.EFFECTOR:
@@ -199,6 +442,14 @@ class Building(Position):
         assert found, "WARNING: no value"
         return toChange[i]
 
+    '''
+    
+    '''
+    def getConnectionAt(self, x, y, floor):
+        return self.searchPoint(x, y, floor, ConnectionPoint3D)
+
+    def getConnectionTypeAt(self, x, y, floor):
+        return self.connections[floor, x, y]
     '''
     Given a floor and two positions (in terms of [x,y]), with the first associated with an object,
     it updates such position with the second one.
@@ -326,12 +577,18 @@ class Building(Position):
     Given a floor and the position (i,j), returns the object type at that position.
     If the position is not associated with an object, it returns also whether the position is indoor or outdoor.
     '''
-    def getObjectTypeAt(self, numFloor, i, j):
-        val = self.floorsObjects[numFloor, i, j]
+    def getObjectTypeAt(self, i, j, numFloor):
+        val, _, _ = self.getCellInfoAt(numFloor, i, j)
         if val <= 0:
             return self.floors[numFloor, i, j]
         else:
             return val
+
+    def getCellInfoAt(self, numFloor, i, j):
+        val1 = self.floorsObjects[numFloor, i, j]
+        val2 = self.floors[numFloor, i, j]
+        val3 = self.connections[numFloor, i, j]
+        return (val1, val2, val3)
 
     '''
     Returns the number of floors of the building

@@ -136,16 +136,18 @@ class AddBuilding(tk.Toplevel):
     def drawFloor(self):
         if self.currentBuilding is not None:
             matrixToDraw = self.currentBuilding.getFloor(self.currentFloor)
+            connectionsToDraw = self.currentBuilding.getConnectionsMatrix(self.currentFloor)
             if self.currentBuilding.id >= 0:
                 # TODO da cambiare quando ho immagini corrette ma è utile ora
-                matrixToDraw = matrixToDraw[:int(matrixToDraw.shape[0]/2), :int(matrixToDraw.shape[1]/2)]
+                #matrixToDraw = matrixToDraw[:int(matrixToDraw.shape[0]/2), :int(matrixToDraw.shape[1]/2)]
+                pass
 
             # building matrix depending on the cell value
             matrixRGB = np.zeros((matrixToDraw.shape[1], matrixToDraw.shape[0], 3), dtype=np.uint8)
             for i, row in enumerate(matrixToDraw):
                 for j, cell in enumerate(row):
                     if self.selectedObject is not None and i == self.selectedObject[0] and j == self.selectedObject[1]:
-                        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, i, j)
+                        currentSelectedObject = self.currentBuilding.getObjectTypeAt(i, j, self.currentFloor)
                         if PointType.isObject(currentSelectedObject):
                             currentObject = self.currentBuilding.getObjectAt(self.currentFloor, (i, j))
                             matrixRGB[j, i] = currentObject.getSelectedColor()
@@ -158,10 +160,15 @@ class AddBuilding(tk.Toplevel):
                             currentObject = self.currentBuilding.getObjectAt(self.currentFloor, (i, j))
                             matrixRGB[j, i] = currentObject.getColor()
 
+            for i, row in enumerate(connectionsToDraw):
+                for j, cell in enumerate(row):
+                    if PointType.isValid(cell):
+                        matrixRGB[j, i] = [255, 255, 255] if cell == PointType.STAIR else ([0, 0, 0] if cell == PointType.LIFT else ([255, 0, 255] if cell == PointType.STAIR_PIVOT else [128, 0, 255]))
             # resizing the matrix for the canvas and adjusting the canvas
-            self.hsize = 1000
+            self.hsize = 400
             self.ratioUIMatrix = (self.hsize / float(matrixRGB.shape[0]))
             self.finalWidth = int((float(matrixRGB.shape[1]) * float(self.ratioUIMatrix)))
+
             self.canvas = tk.Canvas(self, width=self.finalWidth, height=self.hsize)
             self.canvas.grid(column=0, row=0, rowspan=8)
             # building the image and resizing it
@@ -207,15 +214,27 @@ class AddBuilding(tk.Toplevel):
     def onCanvasHover(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         xMatrix, yMatrix = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, xMatrix, yMatrix)
+        currentSelectedObject = self.currentBuilding.getObjectTypeAt(xMatrix, yMatrix, self.currentFloor)
+        shownTip = False
 
+        # show for selected
         if PointType.isValid(currentSelectedObject) and PointType.isObject(currentSelectedObject):
+            shownTip = True
             currentObj = self.currentBuilding.getObjectAt(self.currentFloor, (xMatrix, yMatrix))
             if self.tipWindow is None or self.tipWindow != currentObj.getId():
-                self.showTipWindow(currentObj.getId(), currentObj, x, y)
+                self.showTipWindow(currentObj.__hash__(), currentObj, x, y)
         else:
             self.clearTipWindow()
 
+        # show for other cases
+        if not shownTip:
+            currentSelectedObject = self.currentBuilding.getConnectionTypeAt(xMatrix, yMatrix, self.currentFloor)
+            if PointType.isConnection(currentSelectedObject):
+                currentObj = self.currentBuilding.getConnectionAt(xMatrix, yMatrix, self.currentFloor)
+                if currentObj.pivot != None:
+                    currentObj = currentObj.pivot
+                    if self.tipWindow is None or self.tipWindow != currentObj.__hash__():
+                        self.showTipWindow(currentObj.__hash__(), currentObj, x, y)
     '''
     Clears all the opened windows
     '''
@@ -278,7 +297,7 @@ class AddBuilding(tk.Toplevel):
     def onCanvasDoubleClick(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         x, y = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, x, y)
+        currentSelectedObject = self.currentBuilding.getObjectTypeAt(x, y, self.currentFloor)
 
         if PointType.isValid(currentSelectedObject) and PointType.isObject(currentSelectedObject):
             self.selectedObject = None
@@ -312,7 +331,7 @@ class AddBuilding(tk.Toplevel):
     def onCanvasClick(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         x, y = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(self.currentFloor, x, y)
+        currentSelectedObject = self.currentBuilding.getObjectTypeAt(x, y, self.currentFloor)
 
         if PointType.isValid(currentSelectedObject):
             if PointType.isObject(currentSelectedObject):
