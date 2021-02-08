@@ -10,6 +10,9 @@ class Effector(Position):
         self.idx = idx
         self.mac = mac.lower()
 
+    def isEffector(self):
+        return True
+
     def getColor(self):
         return [255, 0, 0]
 
@@ -32,11 +35,14 @@ class Effectors:
         self.idx_current = 0
 
     def activate_effectors(self, current_position: Position):
-        filtered_effectors = [effector for effector in self.effectors if distance.distance(current_position.getPosition(), effector.getPosition()).m < THRESHOLD_DISTANCE]
+        filtered_effectors = [effector for effector in self.effectors if distance.distance(current_position.getCoordinates(), effector.getCoordinates()).m < THRESHOLD_DISTANCE]
         return filtered_effectors
 
     def add(self, effector):
         self.effectors.append(effector)
+
+    def remove(self, effector):
+        self.effectors.remove(effector)
 
     def __next__(self):
         if self.idx_current < len(self.effectors):

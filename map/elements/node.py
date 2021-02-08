@@ -20,6 +20,9 @@ class Node(Position):
     def getId(self):
         return "ANCHOR_{}".format(self.idx)
 
+    def isAnchor(self):
+        return True
+
     def __str__(self):
         position_str = Position.__str__(self)
         return "{}\n{}".format(position_str, self.mac)

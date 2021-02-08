@@ -23,6 +23,9 @@ class Nodes:
             self.idx_current = 0
             raise StopIteration
 
+    def remove(self, node):
+        self.nodes.remove(node)
+
     def add(self, node: Node):
         self.nodes.append(node)
 

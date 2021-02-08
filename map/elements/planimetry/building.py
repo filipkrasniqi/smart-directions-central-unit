@@ -9,7 +9,7 @@ from map.elements.nodes import Nodes
 from map.elements.planimetry.point import Point3D, StairPoint3D, LiftPoint3D, ConnectionPoint3D
 from map.elements.planimetry.point_type import PointType
 from map.elements.poi import PoI, PoIs
-from map.elements.position import Position
+from map.elements.position import Position, PositionOnlinePath
 
 import bisect
 import numpy as np
@@ -28,11 +28,63 @@ class Building(Position):
             kwargs.get('id', -1), kwargs.get('x', 0), kwargs.get('y', 0), kwargs.get('z', 0), \
             kwargs.get('points', Building.home_planimetry()), kwargs.get('name', "")
         Position.__init__(self, x, y, z, name)
-        # init everything: floors, sort points
-        self.routingTable = {}
         self.connections, self.floors, self.floorsObjects, self.anchors, self.effectors, self.pois = \
             None, None, None, None, None, None
+        # inits anchors, effectors, pois, ...
         self.__initBuilding(points)
+        # TODO here I potentially could build the distance matrix also among different floors
+        '''
+        for floor in range(self.numFloors):
+            pois, pivots = self.pois[floor], self.pivots[floor]
+            for (poi, pivot) in itertools.product(*[pois, pivots]):
+                # TODO non va bene per un cheiz
+                position1, position2 = poi.getPosition(), pivot.getPosition()
+                self.distanceMatrixPivotsPoIs["{}_{}".format(poi.__hash__(), pivot.__hash__())] = abs(poi.x-pivot.x)+abs(poi.y-pivot-y)
+        '''
+        # routing table: comprehends distances between each pivot and those to which it is connected
+
+    def initRouting(self):
+        # routing table: it's a dict of dicts, s.t. routingTable[poi] = dictAnchor; routingTable[poi][anchor] = nextPoint
+        dictAnchors = {anchor: {} for anchor in self.anchors}
+        self.routingTable = {poi: dictAnchors for poi in self.pois}
+
+        # computing distances for pois - pivots on same floor: comprehends distances between pois and pivots of same floor
+        for floor in range(self.numFloors):
+            for poi in self.pois[floor]:
+                poi.getPosition().updateDistanceMatrix(self.floors)
+            for pivot in self.pivots[floor]:
+                pivot.getPosition().updateDistanceMatrix(self.floors)
+
+        floorsCombination = itertools.product(*[range(self.numFloors),range(self.numFloors)])
+
+        # initializing the dictionary of the form: key = <poi> - <anchor> -> distance
+        self.distanceMatrixPoiPivot = {"{}_{}".format(poi.__hash__(), pivot.__hash__()): self.computeDistance(poi, pivot) \
+                               for floor1, floor2 in floorsCombination for poi, pivot in
+                               itertools.product(*[self.pois[floor1], self.pivots[floor2]])}
+
+        '''
+        for floor in range(self.numFloors):
+            self.distanceMatrix[]
+        '''
+
+        # TODO sono in un ancora; ho poi; controllo piani: se sono uguali, poi.computeDistance;
+        # TODO se sono diversi: decido a quale scala devo andare, attivo il primo effettore disponibile,
+        # TODO e trovo il nodo che si dovrà a
+
+        '''
+        self.distanceMatrixAnchorPivot = {}
+        for floorAnchor, floorPoi in floorsCombination:
+            anchor, poi = self.anchors[floorAnchor], self.pois[floorPoi]
+            if floorAnchor == floorPoi:
+                # I am simply checking the distance between anchors and pois of same floor
+                self.distanceMatrixAnchorPivot.update("{}_{}".format(anchor, poi),
+                                                      poi.getPosition().getDistance(anchor))
+            else:
+                # compute all distances anchor - pivot + ...
+                pivots = self.pivots[floorAnchor]
+                distance = np.min()
+        '''
+        # TODO
 
     '''
     Two buildings are equal if they both are instance of Building class and the ID is the same
@@ -51,19 +103,29 @@ class Building(Position):
 
         return min(x_arr), max(x_arr), min(y_arr), max(y_arr), min(z_arr), max(z_arr)
 
-    def searchPoints(self, x, y, floor):
-        points = [p for p in self.points if p.x == x and p.y == y and p.floor == floor]
+    def searchPoints(self, x, y, z):
+        points = [p for p in self.points if p.__hash__() == Position.computeHash(x, y, z)]
         assert len(points) > 0, 'Point not found'
         return points
 
-    def searchPoint(self, x, y, floor, className = None):
-        points = self.searchPoints(x, y, floor)
+    def searchPoint(self, x, y, z, className = None):
+        points = self.searchPoints(x, y, z)
         if className is not None:
             points = list(filter(lambda x: isinstance(x, className), points))
         return None if len(points) <= 0 else points[0]
 
-    def getPoint(self, x, y, floor):
-        return self.pointsDict[Point3D.computeHash(x, y, floor)]
+    def searchPointFromPivotList(self, x, y, floor):
+        pivots = self.pivots[floor]
+        points = [p for p in pivots if p.x == x and p.y == y]
+        point = None
+        if len(points) > 0:
+            point = points[0]
+        return point
+
+    def searchPointFromDict(self, x, y, floor):
+        hashVal = Position.computeHash(x, y, floor)
+        point = self.dictPoints.get(hashVal, None)
+        return point
 
     '''
     Given a type of search (STAIR or LIFT)
@@ -104,11 +166,13 @@ class Building(Position):
                     self.connections[floor][centerOfMass] = typeToSet
                     pivotPoint = self.searchPoint(centerOfMass[0], centerOfMass[1], floor, className)
 
+                    self.pivots[floor].append(pivotPoint)
+
                     # for each point of the uniqueGroup, assign the pivot point
                     for x in range(uniqueGroupsIdxs.shape[0]):
                         for y in range(uniqueGroupsIdxs.shape[1]):
                             if uniqueGroupsIdxs[x, y] == clumpVal:
-                                point = self.searchPoint(x, y, floor, className)
+                                point = self.searchPoint(x, y, floor, ConnectionPoint3D)
                                 point.setPivot(pivotPoint)
 
     '''
@@ -193,14 +257,14 @@ class Building(Position):
                         i, pivotDown = 0, None
                         while i < len(xVals) and pivotDown is None:
                             x, y = xVals[i], yVals[i]
-                            pivotDown = self.searchPoint(x, y, floor, StairPoint3D)
+                            pivotDown = self.searchPointFromPivotList(x, y, floor)
                             i += 1
                         assert pivotDown is not None, "PIVOT NON ESISTE!!!"
                         i, pivotUp = 0, None
                         xVals, yVals = np.where(intersection_2 > 0)
                         while i < len(xVals) and pivotUp is None:
                             x, y = xVals[i], yVals[i]
-                            pivotUp = self.searchPoint(x, y, floor+1, StairPoint3D)
+                            pivotUp = self.searchPointFromPivotList(x, y, floor+1)
                             i += 1
                         assert pivotUp is not None, "PIVOT NON ESISTE!!!"
                         pivotDown.setPointUp(pivotUp.getPivot())
@@ -252,7 +316,7 @@ class Building(Position):
 
         # sort points by (in order): x, y, z with a weight to be minimized computed as: x + 10*y + 100*z,
         # being x, y, z in the range [0, 1]
-        self.points.sort(key=lambda p: p.__hash__())
+        self.points.sort(key=lambda p: p.z * 10000000000 + p.y * 100000 + p.x)
         self.numFloors = len(unique_z)
         # I compute the same transformation for X and Y, so that x € [0, W], y € [0, H]
         unique_x, unique_y, currentX, currentY = [], [], -1, -1
@@ -273,7 +337,7 @@ class Building(Position):
                 currentY += 1
             # updating x and y with corresponding value of index; we change the SdR to natural numbers
 
-        # sort points
+        # assign to points values in new SdR
         for p in self.points:
             p.x, p.y = unique_x.index(p.x), unique_y.index(p.y)
 
@@ -286,9 +350,10 @@ class Building(Position):
             self.floors[p.floor, p.x, p.y] = PointType.INDOOR.value if p.isIndoor else PointType.OUTDOOR
             p.drawn = True
 
-        self.connections = np.zeros(shape=(self.numFloors, width, height))
         connectionPoints = list(filter(lambda x: x.isConnection(), self.points))
         stairPoints = list(filter(lambda x: x.isStair(), connectionPoints))
+
+        self.connections = np.zeros(shape=(self.numFloors, width, height))
         unique_zStairs = list(set([p.z for p in stairPoints]))
         unique_zStairs.sort()
         dictStairZFloors = {}
@@ -320,12 +385,16 @@ class Building(Position):
                 self.connections[p.floor, p.x, p.y] = p.pointType()
                 p.drawn = True
 
-        assert(len([p for p in self.points if not p.drawn]) == 0, "Some points are not drawn!")
+        assert len([p for p in self.points if not p.drawn]) == 0, "Some points are not drawn!"
 
-        # create points dict ONLY for points with floor value: so non connections point and connections point on floor
-        self.pointsDict = {}
-        for p in self.points:
-            self.pointsDict.update({p.__hash__(): p})
+        self.pivots = [[] for _ in range(self.numFloors)]
+
+        self.dictPoints = {}
+        # here init dict
+        for p in connectionPoints:
+            isOnFloor = floor_given_z.get(p.z, -1) > 0
+            if isOnFloor:
+                self.dictPoints[p.__hash__()] = p
 
         # I find the pivot points and assign to the other stair / lift points the corresponding
         self.__assignConnectionsPivot(PointType.STAIR)
@@ -368,12 +437,53 @@ class Building(Position):
             nextAnchor = self.getObjectInPath(level, path, PointType.ANCHOR)
             # anchor is assigned iff there exists something in the middle. If not, it assigns the poi
             if nextAnchor:
-                self.routingTable[anchor] = nextAnchor
+                self.routingTable[poi][anchor] = nextAnchor
             else:
-                self.routingTable[anchor] = poi
+                self.routingTable[poi][anchor] = poi
         # now we have a routing table of the form: <key> = anchor -> <value> = anchor | poi
         # TODO goal would be to build another routing table that has: <key> = (anchor, poi) -> <value> = <direction> (LEFT, TOP, RIGHT, BOTTOM)\
         #  but this information depends too much on the orientation of the user, thus it's better to think about this
+
+    def computeEntireOfflineMap(self):
+        for anchor, poi in itertools.product(*[self.anchors, self.pois]):
+            pass#self.routingTable[poi][anchor] = self.nextOnlinePath(anchor.getPosition(), poi.getPosition())
+
+    def computeDistance(self, start: Position, destination: Position):
+        candidates = [PositionOnlinePath(destination.getPosition(), 0, 0)]
+        visitedCandidates = set()
+        distance = float("+inf")
+        while len(candidates) > 0:
+            candidate = candidates.pop()
+            visitedCandidates.add(candidate)
+            if candidate.z == start.z:
+                distanceCurrentFloor = start.getDistance(candidate)
+                distance = min(distance, candidate.distanceSoFar + distanceCurrentFloor)
+
+            candidatePivots = self.pivots[candidate.z]
+            nextPivotsPosition = []
+            for p in candidatePivots:
+                if p.nextPointUp is not None:
+                    nextPivotsPosition.append(p.nextPointUp)
+                if p.nextPointDown is not None:
+                    nextPivotsPosition.append(p.nextPointDown)
+
+            newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getPosition().getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors+1) \
+                             for p in nextPivotsPosition]
+            candidates = list(set(candidates).union(set(newCandidates)).difference(visitedCandidates))
+            candidates = list(filter(lambda p: p.distanceSoFar < distance, candidates))
+            candidates.sort(key = lambda p: p.navigatedFloors)
+
+        return distance
+
+    def deleteObject(self, x, y, z):
+        toDelete = self.getObjectAt(z, (x, y))
+        if toDelete.isEffector():
+            self.effectors[toDelete.z].remove(toDelete)
+        elif toDelete.isPoI():
+            self.pois[toDelete.z].remove(toDelete)
+            self.initRouting()
+        elif toDelete.isAnchor():
+            self.anchors[toDelete.z].remove(toDelete)
 
     '''
     Given (x, y) 
@@ -381,17 +491,33 @@ class Building(Position):
     '''
     def getPoi(self, position: Position, floor = 0):
         assert self.floorsObjects[floor][position.x, position.y] == PointType.POI, "Wrong object"
-        return self.getObjectAt(floor, position.getPosition())
+        return self.getObjectAt(floor, position.getCoordinates())
 
     '''
     Given start position and destination to reach (a PoI)
     Returns the effector to activate
     '''
-    def toActivate(self, position: Position, destination: Position, numFloor):
+    def toActivateSameFloor(self, position: Position, destination: Position, numFloor):
         poi: PoI = self.getPoi(destination)
         path = poi.computePathList(position)
         effectorToActivate = self.getObjectInPath(numFloor, path, PointType.EFFECTOR)
-        # TODO retrieve the direction
+        return effectorToActivate
+
+    def toActivate(self, start: Position, destination: Position):
+        if start.isSameFloor(destination):
+            path = destination.computePathList(start)
+            effectorToActivate = self.getObjectInPath(start.z, path, PointType.EFFECTOR)
+        else:
+            pivots = self.pivots[start.z]
+            distances = [pivot.getPosition().getDistance(start) + self.distanceMatrixPoiPivot.get(
+                "{}_{}".format(destination.__hash__(), pivot.__hash__())) for pivot in pivots]
+            pivotIdx = np.argmin(distances)
+            pivot = pivots[pivotIdx].getPosition()
+            path = pivot.computePathList(start)
+            effectorToActivate = self.getObjectInPath(start.z, path, PointType.EFFECTOR)
+        if effectorToActivate is None:
+            print("WARNING: effettore non presente")
+        # TODO we should retrieve the direction depending on <whatever>
         return effectorToActivate
 
     '''
@@ -434,8 +560,8 @@ class Building(Position):
             toChange = self.pois[floor]
         i, found = 0, False
         while i < len(toChange) and not found:
-            otherPosition = toChange[i].getPosition()
-            if otherPosition[0] == position[0] and otherPosition[1] == position[1]:
+            otherPosition = toChange[i].getCoordinates()
+            if otherPosition[0] == position[0] and otherPosition[1] == position[1] and toChange[i].z == floor:
                 found = True
             else:
                 i += 1
@@ -443,10 +569,10 @@ class Building(Position):
         return toChange[i]
 
     '''
-    
+    Search for connection object from the pivot list, assuming x,y,z are associated with a pivot object
     '''
-    def getConnectionAt(self, x, y, floor):
-        return self.searchPoint(x, y, floor, ConnectionPoint3D)
+    def getConnectionAt(self, x, y, z):
+        return self.searchPointFromPivotList(x, y, z)
 
     def getConnectionTypeAt(self, x, y, floor):
         return self.connections[floor, x, y]
@@ -457,7 +583,7 @@ class Building(Position):
     def changeObjectPosition(self, floor, oldPosition, newPosition):
         # find object at old position
         toChange = self.getObjectAt(floor, oldPosition)
-        currentPosition = toChange.getPosition()
+        currentPosition = toChange.getCoordinates()
         previousType = self.floorsObjects[floor, currentPosition[0], currentPosition[1]]
         self.floorsObjects[floor, currentPosition[0], currentPosition[1]] = PointType.INVALID
         toChange.changePosition(newPosition[0], newPosition[1])
@@ -473,7 +599,7 @@ class Building(Position):
     Returns all the position associated with an object for the given floor
     '''
     def getUsedPositions(self, floor):
-        usedPositions = [p.getPosition() for p in self.anchors[floor].nodes+self.effectors[floor].effectors+self.pois[floor].pois]
+        usedPositions = [p.getCoordinates() for p in self.anchors[floor].nodes + self.effectors[floor].effectors + self.pois[floor].pois]
         return usedPositions
 
     '''
@@ -534,7 +660,7 @@ class Building(Position):
     Returns the object instance.
     TODO should be updated with the multilevel concept
     '''
-    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 1):
+    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 2):
         floor = self.floorsObjects[numFloor]
         width, height = floor.shape
         i, objectToRetrieve = 0, False

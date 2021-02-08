@@ -1,28 +1,34 @@
+import numpy as np
+
 from map.elements.planimetry.point_type import PointType
+from map.elements.position import Position, WithPosition
 
 
-class Point3D:
+class Point3D(WithPosition):
     def __init__(self, x, y, z, isIndoor):
         self.x, self.y, self.z, self.isIndoor = x, y, z, isIndoor
         self.floor = -1
         self.drawn = False
+        self.position = None
 
+    def getPosition(self):
+        if self.position is None:
+            self.position = self.initPosition()
+        return self.position
+
+    def initPosition(self):
+        return Position(self.x, self.y, self.floor)
     '''
     Hash is unique if values are normalized; if not, that is not true anymore
     '''
     def __hash__(self):
-        return Point3D.computeHash(self.x, self.y, self.floor)
+        return Position.computeHash(self.x, self.y, self.floor)
 
     def __eq__(self, other):
         return isinstance(other, Point3D) and other.x == self.x and other.y == self.y and other.floor == self.floor
 
     def __str__(self):
         return "(X, Y) = {}, {}\nPIANO: {}".format(self.x, self.y, self.floor)
-
-    @staticmethod
-    def computeHash(x, y, z):
-        hash = x + y*100 + z*1000
-        return int(hash)
 
     @staticmethod
     def buildPoint(x, y, z, isIndoor, isLectureRoom, isWideArea, isHallway, isStair, isToilet, isLift):
@@ -82,6 +88,11 @@ class ConnectionPoint3D(Point3D):
         self.nextFloor = -1
         self.pivot = None
         self.nextPointUp, self.nextPointDown = None, None
+
+    # TODO this could consider the length of the stairs (e.g.: number of points going up and down)
+    # TODO while for lifts this could be less
+    def connectionLength(self):
+        return 10
 
     # we assume floors are connected to floor+1 or floor-1
     def setNextFloor(self, isUp):
