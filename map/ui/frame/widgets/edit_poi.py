@@ -9,7 +9,7 @@ class EditPoI(tk.Toplevel):
         self.wm_title("Edit point of interest")
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        self.wm_geometry("+%d+%d" % (poi.getPosition()[0] + 20, poi.getPosition()[1] + 57))
+        self.wm_geometry("+%d+%d" % (poi.getCoordinates()[0] + 20, poi.getCoordinates()[1] + 57))
 
         self.poi = poi
 

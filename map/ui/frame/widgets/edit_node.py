@@ -11,7 +11,7 @@ class EditNode(tk.Toplevel):
         self.wm_title("Edit {}".format("anchor" if isinstance(node, Node) else "effector"))
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        self.wm_geometry("+%d+%d" % (node.getPosition()[0] + 20, node.getPosition()[1] + 57))
+        self.wm_geometry("+%d+%d" % (node.getCoordinates()[0] + 20, node.getCoordinates()[1] + 57))
 
         self.node = node
 

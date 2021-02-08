@@ -56,27 +56,31 @@ class AddBuilding(tk.Toplevel):
         self.poiBtn.grid(column=1, row=4)
         self.poiBtn.configure(state="disabled")
 
+        self.cancelUpdates = tk.Button(self, text="Delete selected", fg="grey",
+                                     command=self.deleteSelected)
+        self.cancelUpdates.grid(column=1, row=5)
+
         self.saveBtn = tk.Button(self, text="Save and go back", fg="grey",
                                      command=self.save)
-        self.saveBtn.grid(column=1, row=5)
+        self.saveBtn.grid(column=1, row=6)
         self.saveBtn.configure(state="disabled")
 
         self.cancelUpdates = tk.Button(self, text="Cancel updates", fg="grey",
                                      command=self.cancel)
-        self.cancelUpdates.grid(column=1, row=6)
+        self.cancelUpdates.grid(column=1, row=7)
 
         self.floorEntry = tk.Entry(self)
-        self.floorEntry.grid(column=1, row=7)
+        self.floorEntry.grid(column=1, row=8)
         self.floorEntry.configure(state="disabled")
 
         self.confirmFloor = tk.Button(self, text="Change floor", fg="grey",
                                      command=self.changeFloor)
-        self.confirmFloor.grid(column=1, row=8)
+        self.confirmFloor.grid(column=1, row=9)
         self.confirmFloor.configure(state="disabled")
 
         self.loadBtn = tk.Button(self, text="Load home", fg="grey",
                              command=self.buildHome)
-        self.loadBtn.grid(column=1, row=9)
+        self.loadBtn.grid(column=1, row=10)
 
         if self.isUpdate:
             self.enableButtons()
@@ -147,8 +151,8 @@ class AddBuilding(tk.Toplevel):
             for i, row in enumerate(matrixToDraw):
                 for j, cell in enumerate(row):
                     if self.selectedObject is not None and i == self.selectedObject[0] and j == self.selectedObject[1]:
-                        currentSelectedObject = self.currentBuilding.getObjectTypeAt(i, j, self.currentFloor)
-                        if PointType.isObject(currentSelectedObject):
+                        objectType = self.currentBuilding.getObjectTypeAt(i, j, self.currentFloor)
+                        if PointType.isObject(objectType):
                             currentObject = self.currentBuilding.getObjectAt(self.currentFloor, (i, j))
                             matrixRGB[j, i] = currentObject.getSelectedColor()
                         else:
@@ -214,11 +218,11 @@ class AddBuilding(tk.Toplevel):
     def onCanvasHover(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         xMatrix, yMatrix = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(xMatrix, yMatrix, self.currentFloor)
+        objectType = self.currentBuilding.getObjectTypeAt(xMatrix, yMatrix, self.currentFloor)
         shownTip = False
 
         # show for selected
-        if PointType.isValid(currentSelectedObject) and PointType.isObject(currentSelectedObject):
+        if PointType.isValid(objectType) and PointType.isObject(objectType):
             shownTip = True
             currentObj = self.currentBuilding.getObjectAt(self.currentFloor, (xMatrix, yMatrix))
             if self.tipWindow is None or self.tipWindow != currentObj.getId():
@@ -228,8 +232,8 @@ class AddBuilding(tk.Toplevel):
 
         # show for other cases
         if not shownTip:
-            currentSelectedObject = self.currentBuilding.getConnectionTypeAt(xMatrix, yMatrix, self.currentFloor)
-            if PointType.isConnection(currentSelectedObject):
+            objectType = self.currentBuilding.getConnectionTypeAt(xMatrix, yMatrix, self.currentFloor)
+            if PointType.isConnection(objectType):
                 currentObj = self.currentBuilding.getConnectionAt(xMatrix, yMatrix, self.currentFloor)
                 if currentObj.pivot != None:
                     currentObj = currentObj.pivot
@@ -297,15 +301,15 @@ class AddBuilding(tk.Toplevel):
     def onCanvasDoubleClick(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         x, y = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(x, y, self.currentFloor)
+        objectType = self.currentBuilding.getObjectTypeAt(x, y, self.currentFloor)
 
-        if PointType.isValid(currentSelectedObject) and PointType.isObject(currentSelectedObject):
+        if PointType.isValid(objectType) and PointType.isObject(objectType):
             self.selectedObject = None
             objToEdit = self.currentBuilding.getObjectAt(self.currentFloor, (x, y))
             # open corresponding modal: effector, node, poi
-            if currentSelectedObject == PointType.ANCHOR:
+            if objectType == PointType.ANCHOR:
                 self.showEditNodeWindow(objToEdit)
-            elif currentSelectedObject == PointType.EFFECTOR:
+            elif objectType == PointType.EFFECTOR:
                 self.showEditEffectorWindow(objToEdit)
             else:
                 self.showEditPoIWindow(objToEdit)
@@ -331,14 +335,14 @@ class AddBuilding(tk.Toplevel):
     def onCanvasClick(self, event):
         x, y = self.transformClickCoordinatesToCanvas(event.x, event.y)
         x, y = self.transformCanvasCoordinatesToMatrix(x, y)
-        currentSelectedObject = self.currentBuilding.getObjectTypeAt(x, y, self.currentFloor)
+        objectType = self.currentBuilding.getObjectTypeAt(x, y, self.currentFloor)
 
-        if PointType.isValid(currentSelectedObject):
-            if PointType.isObject(currentSelectedObject):
+        if PointType.isValid(objectType):
+            if PointType.isObject(objectType):
                 self.selectedObject = (x, y)
             else:
                 if self.selectedObject is not None:
-                    if PointType.isObject(currentSelectedObject):
+                    if PointType.isObject(objectType):
                         self.selectedObject = (x, y)
                     else:
                         self.currentBuilding.changeObjectPosition(self.currentFloor, self.selectedObject, (x, y))
@@ -367,6 +371,18 @@ class AddBuilding(tk.Toplevel):
     def addEffector(self):
         self.currentBuilding.addEffector(self.currentFloor)
         self.drawFloor()
+
+    '''
+    If present, it deletes the selected object
+    '''
+    def deleteSelected(self):
+        if self.selectedObject is not None:
+            i, j = self.selectedObject
+            objectType = self.currentBuilding.getObjectTypeAt(i, j, self.currentFloor)
+            if PointType.isObject(objectType):
+                self.selectedObject = None
+                self.currentBuilding.deleteObject(i, j, self.currentFloor)
+                self.drawFloor()
 
     '''
     Add the PoI to the building at the first available position and updates UI
