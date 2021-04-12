@@ -15,6 +15,7 @@ import numpy as np
 '''
 UI associated with adding/updating a building
 '''
+# TODO rimuovere possibilità di aprire due UI contemporaneamente
 class AddBuilding(tk.Toplevel):
     def __init__(self, master, id, building = None):
         tk.Toplevel.__init__(self, master=master)
@@ -31,6 +32,8 @@ class AddBuilding(tk.Toplevel):
         # setting grid shape
         self.master.grid_columnconfigure(0, weight=6)
         self.master.grid_columnconfigure(1, weight=1)
+
+        self.canvas = None
 
         # adding frames
         self.loadBtn = tk.Button(self, text="Load from file", fg="grey",
@@ -87,18 +90,22 @@ class AddBuilding(tk.Toplevel):
             self.updateUIWithBuildingInfo()
             self.drawFloor()
 
+        self.grid()
+
     '''
     Listener on frame being closed. Not handling asking for confirmation.
     '''
     def on_closing(self):
         self.master.toggle(enable=True)
+        self.master.reset_selected()
+        self.building = None
         self.destroy()
 
     def buildHome(self):
-        self.currentBuilding = Building()
+        self.set_building(Building(id=self.id, name="Casa - {}".format(self.id)))
         self.currentFloor = 0
-        self.updateUIWithBuildingInfo()
         self.enableButtons()
+        self.updateUIWithBuildingInfo()
         self.drawFloor()
 
     '''
@@ -109,18 +116,22 @@ class AddBuilding(tk.Toplevel):
         filename = filedialog.askopenfilename(initialdir = "/",title = "Select file",filetypes = [("Txt files", ".txt")])
         parser = Parser("").getInstance()
         points = parser.read_points_from_txt(filename)
-        self.currentBuilding = Building(id=self.id, latitude=0, longitude=0, points=points, name="Nuovo edificio")
+        self.set_building(Building(id=self.id, latitude=0, longitude=0, points=points, name="Nuovo edificio - {}".format(self.id)))
         self.currentFloor = 0
-        self.updateUIWithBuildingInfo()
         self.enableButtons()
+        self.updateUIWithBuildingInfo()
         self.drawFloor()
 
+    def set_building(self, building):
+        self.currentBuilding = building
+        #self.nameEntry.insert(0, "{} - {}".format(self.currentBuilding.name, self.currentBuilding.id))
     '''
     Updates the UI with the building information (name and floor)
     '''
     def updateUIWithBuildingInfo(self):
         self.floorEntry.insert(0, str(self.currentFloor))
-        self.nameEntry.insert(0, self.currentBuilding.name)
+        self.nameEntry.insert(0,self.currentBuilding.name)
+        self.grid()
 
     '''
     Listener to change floor btn. If the floor is valid, it updates the UI with the new floor.
@@ -141,10 +152,6 @@ class AddBuilding(tk.Toplevel):
         if self.currentBuilding is not None:
             matrixToDraw = self.currentBuilding.getFloor(self.currentFloor)
             connectionsToDraw = self.currentBuilding.getConnectionsMatrix(self.currentFloor)
-            if self.currentBuilding.id >= 0:
-                # TODO da cambiare quando ho immagini corrette ma è utile ora
-                #matrixToDraw = matrixToDraw[:int(matrixToDraw.shape[0]/2), :int(matrixToDraw.shape[1]/2)]
-                pass
 
             # building matrix depending on the cell value
             matrixRGB = np.zeros((matrixToDraw.shape[1], matrixToDraw.shape[0], 3), dtype=np.uint8)
@@ -172,6 +179,9 @@ class AddBuilding(tk.Toplevel):
             self.hsize = 400
             self.ratioUIMatrix = (self.hsize / float(matrixRGB.shape[0]))
             self.finalWidth = int((float(matrixRGB.shape[1]) * float(self.ratioUIMatrix)))
+
+            if self.canvas is not None:
+                self.canvas.destroy()
 
             self.canvas = tk.Canvas(self, width=self.finalWidth, height=self.hsize)
             self.canvas.grid(column=0, row=0, rowspan=8)
@@ -247,6 +257,10 @@ class AddBuilding(tk.Toplevel):
         self.clearEditNodeWindow()
         self.clearEditEffectorWindow()
         self.clearEditPoIWindow()
+
+    def reset_selected(self):
+        self.indexSelected = -1
+        self.enableSelected(False)
 
     '''
     Eventually clears the edit node window
@@ -397,9 +411,9 @@ class AddBuilding(tk.Toplevel):
     def save(self):
         self.currentBuilding.name = self.nameEntry.get()
         if self.isUpdate:
-            self.master.editBuilding(self.currentBuilding)
+            self.master.edit_building(self.currentBuilding)
         else:
-            self.master.addBuilding(self.currentBuilding)
+            self.master.add_building(self.currentBuilding)
         self.destroy()
 
     '''
