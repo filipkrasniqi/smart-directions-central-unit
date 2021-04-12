@@ -5,8 +5,6 @@ from concurrent.futures import thread
 import time
 from threading import Thread
 
-from timeloop import Timeloop
-
 import paho.mqtt.client as mqtt
 from ble.log_thread import LogThread
 from localization.localization import Status, LocalizationType
@@ -16,8 +14,11 @@ from map.elements.nodes import Nodes
 
 import datetime
 
+from utils.parser import Parser
+
 BROKER_IP = "80.211.69.17"    # "192.168.1.151" # my laptop
 
+# TODO associarlo ad una SD instance, non ad un building
 class MQTTSubscriber(LogThread):
     client: mqtt.Client
     devices_dict = {}   # dictionary of the form: {mac: {origin: <rssi_queue>}}, being mac = <device sniffed>, origin = <sniffer> (rberry pi)
@@ -25,8 +26,7 @@ class MQTTSubscriber(LogThread):
     nodes: Nodes
     effectors: Effectors
     all_devs = set()
-
-    tl = Timeloop()
+    log_nodes_dict = {} # for log purposes: shows last communication timestamp for each node
 
     def on_connect(self, client, userdata, flags, rc):
         self.client.subscribe("directions/anchor/proximity/#")
@@ -38,10 +38,12 @@ class MQTTSubscriber(LogThread):
 
     def on_activate(self, client, userdata, msg):
         key = msg.topic.split("/")[-1].lower()
+        self.activate_device(key)
 
+    def activate_device(self, key):
         if key not in self.devices_dict:
             self.devices_dict[key] = {}
-        for origin in self.nodes.nodes:
+        for origin in self.anchors():
             if origin.mac not in self.devices_dict[key]:
                 self.devices_dict[key][origin.mac] = collections.deque(self.QUEUE_LENGTH * [{"timestamp": datetime.datetime.now(), "value": -100}], self.QUEUE_LENGTH)
         self.devices_dict[key]["status"] = Status.NAVIGATING
@@ -51,6 +53,11 @@ class MQTTSubscriber(LogThread):
         if key in self.devices_dict:
             self.devices_dict[key]["status"] = Status.INACTIVE
 
+    def anchors(self):
+        return self.sd_instance.rawAnchors()
+
+    def effectors(self):
+        return self.sd_instance.rawEffectors()
 
     @staticmethod
     def local_ip():
@@ -69,13 +76,18 @@ class MQTTSubscriber(LogThread):
                 mac, rssi = splits
                 mac = mac.lower()[2:]
                 key = mac
+            if origin not in self.log_nodes_dict:
+                self.log_nodes_dict.update({origin:[]})
+            self.log_nodes_dict.get(origin).insert(0, datetime.datetime.now())
+
+            # 'fa:03:63:cb:09:03'
+            possible_devs = ['fa:03:63:cb:09:03']
+            if abs(int(rssi[:-1])) < 65 and key not in possible_devs:
+                pass
             # checking that it actually exists
-            # f8:01:61:c9:07:01
-            if abs(int( rssi[:-1])) < 70:
-                print(key)
             if key in self.devices_dict:
                 # checking that node exists
-                if origin in [node.mac.lower() for node in self.nodes.nodes]:
+                if origin in [node.mac.replace("\n", "").lower() for node in self.anchors()]:
                     rssi = rssi[:-1]    # removing \n added by c++ code to have char*
                     # finally adding rssi
                     try:
@@ -84,7 +96,9 @@ class MQTTSubscriber(LogThread):
                     except:
                         self.errorLog("Unable to parse")
                 else:
-                    self.log("Unknown device communicating")
+                    self.log("Unknown node")
+            else:
+                self.log("Unknown device communicating")
         else:
             self.errorLog("Unable to split")
 
@@ -93,14 +107,31 @@ class MQTTSubscriber(LogThread):
 
     def run_timer(self):
         while True:
-            localizationTimer = LocalizationTimer(self.client, self.nodes, self.effectors, self.devices_dict, \
-                                                  localizationType=LocalizationType.NODE)
+            localizationTimer = LocalizationTimer(self.client, self.sd_instance, self.devices_dict, LocalizationType.NODE)
             localizationTimer.start()
             time.sleep(2)
             # TODO here it is the right place where to clean up a bit
 
-    def __init__(self, name, nodes, effectors):
+    def device_rssi(self, idDevice):
+        if idDevice in self.devices_dict:
+            return self.devices_dict[idDevice]
+        else:
+            return None
+
+    def __init__(self, name, id_sd = -1):
         LogThread.__init__(self, name)
+        id_sd = int(id_sd)
+        # Initializing architecture stuff
+        parser = Parser().getInstance()
+        try:
+            sd_instance = parser.read_smartdirections_instance(id_sd)
+        except:
+            print("ERROR: wrong SD ID")
+            raise Exception()
+        #building = list(filter(lambda b: b.id == idBuilding, parser.read_sd_buildings()))
+        #assert len(building) == 1, "Something wrong"
+        self.sd_instance = sd_instance
+        self.sd_instance.initRouting()
 
         # Initializing mqtt protocol
         self.client = mqtt.Client()
@@ -111,28 +142,9 @@ class MQTTSubscriber(LogThread):
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
 
-        # Initializing architecture stuff
-        self.nodes, self.effectors = nodes, effectors
-
         # start timer executing localization thread
         t1 = threading.Thread(target=self.run_timer)
         t1.start()
 
     def run(self):
         self.client.loop_forever()
-
-class TimerOfLocalization(LogThread):
-    def __init__(self, subscriberThread: MQTTSubscriber):
-        LogThread.__init__(self, "Prova")
-        self.subscriberThread = subscriberThread
-
-    def run(self):
-        while True:
-            localizationTimer = LocalizationTimer(
-                self.subscriberThread.client,
-                self.subscriberThread.nodes,
-                self.subscriberThread.effectors,
-                self.subscriberThread.devices_dict
-            )
-            localizationTimer.start()
-            time.sleep(1)
