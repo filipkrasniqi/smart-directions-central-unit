@@ -31,7 +31,8 @@ class Building(Position):
         self.connections, self.floors, self.floorsObjects, self.anchors, self.effectors, self.pois = \
             None, None, None, None, None, None
         # inits anchors, effectors, pois, ...
-        self.__initBuilding(points)
+        self.points: list[Point3D] = points
+        self.__initBuilding()
         # TODO here I potentially could build the distance matrix also among different floors
         '''
         for floor in range(self.numFloors):
@@ -51,9 +52,9 @@ class Building(Position):
         # computing distances for pois - pivots on same floor: comprehends distances between pois and pivots of same floor
         for floor in range(self.numFloors):
             for poi in self.pois[floor]:
-                poi.getPosition().updateDistanceMatrix(self.floors)
+                poi.updateDistanceMatrix(self.floors)
             for pivot in self.pivots[floor]:
-                pivot.getPosition().updateDistanceMatrix(self.floors)
+                pivot.updateDistanceMatrix(self.floors)
 
         floorsCombination = itertools.product(*[range(self.numFloors),range(self.numFloors)])
 
@@ -61,30 +62,6 @@ class Building(Position):
         self.distanceMatrixPoiPivot = {"{}_{}".format(poi.__hash__(), pivot.__hash__()): self.computeDistance(poi, pivot) \
                                for floor1, floor2 in floorsCombination for poi, pivot in
                                itertools.product(*[self.pois[floor1], self.pivots[floor2]])}
-
-        '''
-        for floor in range(self.numFloors):
-            self.distanceMatrix[]
-        '''
-
-        # TODO sono in un ancora; ho poi; controllo piani: se sono uguali, poi.computeDistance;
-        # TODO se sono diversi: decido a quale scala devo andare, attivo il primo effettore disponibile,
-        # TODO e trovo il nodo che si dovrà a
-
-        '''
-        self.distanceMatrixAnchorPivot = {}
-        for floorAnchor, floorPoi in floorsCombination:
-            anchor, poi = self.anchors[floorAnchor], self.pois[floorPoi]
-            if floorAnchor == floorPoi:
-                # I am simply checking the distance between anchors and pois of same floor
-                self.distanceMatrixAnchorPivot.update("{}_{}".format(anchor, poi),
-                                                      poi.getPosition().getDistance(anchor))
-            else:
-                # compute all distances anchor - pivot + ...
-                pivots = self.pivots[floorAnchor]
-                distance = np.min()
-        '''
-        # TODO
 
     '''
     Two buildings are equal if they both are instance of Building class and the ID is the same
@@ -102,6 +79,46 @@ class Building(Position):
             [point.z for point in self.points]
 
         return min(x_arr), max(x_arr), min(y_arr), max(y_arr), min(z_arr), max(z_arr)
+
+    def size_floor(self):
+        minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals()
+        width, height = (maxX - minX) + 1, (maxY - minY) + 1
+        return width, height
+
+    def grid_sizes(self):
+        return 5, 5
+
+    @staticmethod
+    def grid_intervals(num, size, begin):
+        num_parts = num // size
+        remaining = [size + 1] * (num - num_parts * size)
+        cell_sizes = remaining + [size] * num_parts
+        intervals, start_point = [], begin
+        for cell_size in cell_sizes:
+            intervals.append((start_point, start_point + cell_size))
+            start_point += cell_size
+        return intervals
+
+    def horizontal_grid_intervals(self):
+        width_grid, _ = self.grid_sizes()
+        width, _ = self.size_floor()
+        min_x, _, _, _, _, _ = self.getMinMaxVals()
+        return Building.grid_intervals(width, width_grid, min_x)
+
+    def vertical_grid_intervals(self):
+        _, height_grid = self.grid_sizes()
+        _, height = self.size_floor()
+        _, _, min_y, _, _, _ = self.getMinMaxVals()
+        return Building.grid_intervals(height, height_grid, min_y)
+
+    def get_position_from_grid_number(self, grid_number, floor):
+        x_intervals, y_intervals = self.horizontal_grid_intervals(), self.vertical_grid_intervals()
+        x_lims = x_intervals[grid_number % len(x_intervals)]
+        y_lims = y_intervals[grid_number // len(x_intervals)]
+        # TODO in questi range, trovare uno spazio libero, possibilmente al centro; ad ora, forzo con il centro
+        x_val, y_val = (x_lims[0]+x_lims[1])//2, (y_lims[0]+y_lims[1])//2
+        assert self.isValid(x_val, y_val, floor), "WRONG POSITION"
+        return Position(x_val, y_val, floor)
 
     def searchPoints(self, x, y, z):
         points = [p for p in self.points if p.__hash__() == Position.computeHash(x, y, z)]
@@ -275,10 +292,9 @@ class Building(Position):
     Init the building given the points.
     The output would be a list of floor obj (one for each floor), i.e. matrices having walkable / non-walkable points
     '''
-    def __initBuilding(self, points):
+    def __initBuilding(self):
         # sort points by (x, y, z). To do that, I need to normalize the value, so that I know how to weight differently
         # the coordinates
-        self.points: list[Point3D] = points
         # round all vals of points
         for p in self.points:
             p.x, p.y, p.z = round(p.x, 2), round(p.y, 2), round(p.z, 2)
@@ -341,8 +357,7 @@ class Building(Position):
         for p in self.points:
             p.x, p.y = unique_x.index(p.x), unique_y.index(p.y)
 
-        minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals()
-        width, height = (maxX - minX) + 1, (maxY - minY) + 1
+        width, height = self.size_floor()
         # build list of matrices: WxH for each floor
         # self.floors is a list of masks defining whether it is indoor, outdoor or invalid
         self.floors = np.zeros(shape=(self.numFloors, width, height))
@@ -408,9 +423,9 @@ class Building(Position):
 
         # self.floorsObjects is a list of masks defining, for the valid places, the objects (anchors, effectors, point of interest)
         self.floorsObjects = np.zeros(shape=(self.numFloors, width, height))
-        self.anchors, self.effectors, self.pois = [Nodes() for _ in range(self.numFloors)],\
-                                                  [Effectors() for _ in range(self.numFloors)],\
-                                                  [PoIs() for _ in range(self.numFloors)]
+        self.anchors, self.effectors, self.pois = [Nodes([], None) for _ in range(self.numFloors)],\
+                                                  [Effectors([]) for _ in range(self.numFloors)],\
+                                                  [PoIs([]) for _ in range(self.numFloors)]
 
     '''
     Builds the routing table for SD purposes.
@@ -467,7 +482,7 @@ class Building(Position):
                 if p.nextPointDown is not None:
                     nextPivotsPosition.append(p.nextPointDown)
 
-            newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getPosition().getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors+1) \
+            newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getPosition().getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors + 1) \
                              for p in nextPivotsPosition]
             candidates = list(set(candidates).union(set(newCandidates)).difference(visitedCandidates))
             candidates = list(filter(lambda p: p.distanceSoFar < distance, candidates))
@@ -477,6 +492,7 @@ class Building(Position):
 
     def deleteObject(self, x, y, z):
         toDelete = self.getObjectAt(z, (x, y))
+        # update instance of effector or whatever
         if toDelete.isEffector():
             self.effectors[toDelete.z].remove(toDelete)
         elif toDelete.isPoI():
@@ -484,6 +500,8 @@ class Building(Position):
             self.initRouting()
         elif toDelete.isAnchor():
             self.anchors[toDelete.z].remove(toDelete)
+        # update building matrix
+        self.floorsObjects[z, x, y] = self.floors[z, x, y]
 
     '''
     Given (x, y) 
@@ -610,16 +628,28 @@ class Building(Position):
         toAvoid = self.getUsedPositions(floor)
         for i, row in enumerate(matrix):
             for j, cell in enumerate(row):
-                if self.isValid(i, j, floor) and (i,j) not in toAvoid:
+                if self.isValid(i, j, floor) and (i,j, floor) not in toAvoid:
                     return (i,j)
 
     '''
+    Iterates the floor matrix from (0,0) to (width, height) and returns the first valid position for that floor
+    '''
+    def findFirstValidCoordinateInGrid(self, floor, position_in_grid):
+        matrix = self.floorsObjects[floor]
+        toAvoid = self.getUsedPositions(floor)
+        for i, row in enumerate(matrix):
+            for j, cell in enumerate(row):
+                if self.isValid(i, j, floor) and (i,j, floor) not in toAvoid:
+                    return (i,j)
+    '''
     Adds an anchor to the floor at the first available position
     '''
-    def addAnchor(self, floor):
+    def addAnchor(self, floor, anchor = None):
         validCoordinates = self.findFirstValidCoordinate(floor)
         anchors = self.anchors[floor]
-        anchors.add(Node(len(anchors), validCoordinates[0], validCoordinates[1], floor, "Ancora {}".format(len(anchors)), "RNDM"))
+        if anchor is None:
+            anchor = Node(len(anchors), validCoordinates[0], validCoordinates[1], floor, "Ancora {}".format(len(anchors)), "RNDM")
+        anchors.add(anchor)
         self.floorsObjects[floor, validCoordinates[0], validCoordinates[1]] = PointType.ANCHOR
 
     '''
@@ -765,4 +795,24 @@ class Building(Position):
             for y in range(11, 15):
                 points.append(Point3D(x, y, z_const, True))
         return points
+
+    def rawAnchors(self):
+        anchors = []
+        for row_anchors in self.anchors:
+            anchors += row_anchors
+        return anchors
+
+    def rawEffectors(self):
+        effectors = []
+        for row_effectors in self.effectors:
+            effectors += row_effectors
+        return effectors
+
+    def getInvalidIndices(self):
+        invalids = np.argwhere(self.floors == PointType.INVALID)
+        dict_invalids = [[] for _ in range(self.floors.shape[0])]
+        for invalid in invalids:
+            point_xy = invalid[1:]
+            dict_invalids[invalid[0]].append({"x": int(point_xy[0]), "y": int(point_xy[1])})
+        return dict_invalids
 
