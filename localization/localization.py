@@ -27,7 +27,8 @@ class Localization:
         client = kwargs["client"]
         for effectorMessage in self.build_messages(**kwargs):
             effector, message = effectorMessage
-            client.publish(self.topic(effector), message)
+            if effector:
+                client.publish(self.topic(effector), message)
     def compute(self, mac_dict, mac, origin):
         pass
 
@@ -61,12 +62,22 @@ class NodeLocalization(Localization):
         return "directions/effector/activate/{}".format(effector.mac)
     def build_messages(self, **kwargs):
         # each pair (node, device) has a message of the form: (node, device, is_close)
-        effectors, nodes, devices, devices_dict = kwargs["effectors"], kwargs["nodes"].nodes, kwargs["devices"], kwargs["devices_dict"]
+        # effectors, nodes, devices, devices_dict = kwargs["effectors"], kwargs["nodes"], kwargs["devices"], kwargs["devices_dict"]
+        sd_instance, devices, devices_dict = kwargs["sd_instance"], kwargs["devices"], kwargs["devices_dict"]
+
+        # TODO questo building è quello nel quale viene attivato un effettore e del quale vengono considerate le ancore; per ora, è il primo che trova
+        # TODO da ora in avanti, sarà meglio avere la SD instance, nel quale vengono controllati nuovamente tutti i nodi X devices
+        # TODO per quanto riguarda l'activate, non la si fa più sul building ma sul sd_instance, in modo che se si è ai margini di un building si attiva ANCHE l'effettore d'inizio del building successivo -> navigazione EXTRA BUILDINGS
+
+        first_building = sd_instance.buildings[0]
         # filtering: only in case the device is navigating we compute the localization
         active_devices = [device for device in devices if
                           "status" in devices_dict[device] and devices_dict[device]["status"] == Status.NAVIGATING]
+
+        destination = first_building.pois[0][0] # TODO inserire la destinazione definita dall'utente. Ora è default la prima
+
         messages = []
-        for node, device in itertools.product(*[nodes, active_devices]):
+        for node, device in itertools.product(*[sd_instance.rawAnchors(), active_devices]):
             # check values that do not differ much in time
             if device in devices_dict and node.mac in devices_dict[device]:
                 current_vals = list(devices_dict[device][node.mac])
@@ -76,9 +87,16 @@ class NodeLocalization(Localization):
             # localization: node is close if threshold is greater than <rssiThreshold>
             close = 1 if len(recent_values) > 0 and mean(recent_values) > self.rssiThreshold() else 0
             # then, we activate the effectors that are close to it
-            effectors_to_activate = effectors.activate_effectors(node)
-            for effector in effectors_to_activate:
-                messages.append((effector, "{}${}".format(device, close)))
+            effectors_to_activate = first_building.toActivate(node, destination)
+            if isinstance(effectors_to_activate, list):
+                for effector in effectors_to_activate:
+                    messages.append((effector, "{}${}".format(device, close)))
+            else:
+                effector = effectors_to_activate
+                if effector is not None:
+                    messages.append((effector, "{}${}".format(device, close)))
+                else:
+                    print("NON HO EFFETTORI DA ATTIVARE")
         return messages
     def getType(self):
         return LocalizationType.NODE

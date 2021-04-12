@@ -4,7 +4,7 @@ import numpy as np
 class Nodes:
 
 
-    def __init__(self, nodes = [], adjacency_matrix = None):
+    def __init__(self, nodes, adjacency_matrix):
         self.nodes, self.adjacency_matrix, self.idx_current = nodes, adjacency_matrix, 0
 
     def np_adj_matrix(self):

@@ -41,7 +41,7 @@ class PoI(Position):
         return pathMatrix
 
 class PoIs:
-    def __init__(self, pois = []):
+    def __init__(self, pois):
         self.pois = pois
         self.idx_current = 0
 

@@ -30,7 +30,7 @@ class Effector(Position):
         return "{}\n{}".format(position_str, self.mac)
 
 class Effectors:
-    def __init__(self, effectors = []):
+    def __init__(self, effectors):
         self.effectors = effectors
         self.idx_current = 0
 
