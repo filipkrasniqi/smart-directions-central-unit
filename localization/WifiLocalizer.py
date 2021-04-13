@@ -59,7 +59,7 @@ class WifiLocalizer:
             self.do_cv(model, X_fill, y, 'building')
 
         model.fit(X_fill, y)
-        self.parser.save_building_model(self.id_sd, id_building, self.model_name, self.name, model)
+        self.parser.save_building_floor_model(self.id_sd, id_building, self.model_name, self.name, model)
         return model
 
     def __train_all_building_models(self, do_cv = False):
@@ -71,7 +71,7 @@ class WifiLocalizer:
         model = self.__create_model()
 
         building: Building = self.sd_instance.get_building_from_id(id_building)
-        min_x, max_x, min_y, max_y, min_z, max_z = building.getMinMaxVals()
+        min_z, max_z = building.getFloorRange()
         models = []
         for z in range(min_z, max_z):
             X = df[[col for col in df.columns if "wifi" in col or ("ble" in col and "rndm" not in col)]]
@@ -124,9 +124,9 @@ class WifiLocalizer:
 
         x_block = [i for i, interval in enumerate(x_intervals) if interval[0] <= x <= interval[1]][0]
         y_block = [i for i, interval in enumerate(y_intervals) if interval[0] <= y <= interval[1]][0]
-        max_x_block, max_y_block = max(x_block), max(y_block)
+        #max_x_block, max_y_block = max(x_block), max(y_block)
 
-        return x_block + y_block * max_x_block
+        return x_block + y_block * len(x_intervals)
 
     def infer_floor(self, wifi_features, ble_features, id_building, also_ble = True):
         model = self.models_building_floor[id_building]
@@ -155,7 +155,7 @@ class WifiLocalizer:
 
         features = []
         for wifi_col in wifi_cols:
-            rssi_vals = [wifi['rssi'] for wifi in wifi_features['wifi'] if "wifi_{}".format(wifi['mac']) == wifi_col]
+            rssi_vals = [wifi['rssi'] for wifi in wifi_features if "wifi_{}".format(wifi['mac']) == wifi_col]
             rssi = -120
             if len(rssi_vals) > 0:
                 rssi = rssi_vals[0]
