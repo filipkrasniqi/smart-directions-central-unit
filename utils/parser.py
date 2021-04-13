@@ -201,7 +201,7 @@ class Parser:
             sd_instance: SmartDirectionInstance = self.read_smartdirections_instance(id_sd)
             models = {}
             for b in sd_instance.buildings:
-                _, _, _, _, min_z, max_z = b.getMinMaxVals()
+                min_z, max_z = b.getFloorRange()
                 models_building = {}
                 for z in range(min_z, max_z):
                     models_building.update({z: self.load_building_model(id_sd, b.id, z, model, name)})
