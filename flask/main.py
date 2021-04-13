@@ -63,11 +63,8 @@ def init_node(mac_node):
     id_sd, wifi = data["id_sd"], data["wifi"]
     instance: SmartDirectionInstance = parser.read_smartdirections_instance(id_sd)
 
-    id_building = -1
-    position = None
-    assert id_building > 0 and position is not None, "Wrong values"
-    instance.add_node(id_building, mac_node, wifi)
-    return "OK"
+    to_return = instance.add_node(mac_node, wifi)
+    return to_return
 
 @app.route('/device/<id_device>/activate/', methods=['POST'])
 def select_sd_instance(id_device):
@@ -117,7 +114,7 @@ def locate(id_device):
     name = "wifi" + prefix_ble
 
     model_name = "nb"
-    # TODO prima ottenere z value
+
     model = parser.load_building_model(id_sd, data['id_building'], model_name, name)
     df = parser.read_df_building(id_sd, data['id_building'])
     wifi_cols = [col for col in df.columns if "wifi" in col]
@@ -139,7 +136,7 @@ def locate(id_device):
             if len(recent_values) <= 0:
                 recent_values = [-100]
             features.append(mean(recent_values))
-    # TODO bisognerebbe fare una model predict anche per il building
+
     position = model.predict(np.array(features).reshape(1, -1))
     return jsonify({"position": int(position[0])})
 
