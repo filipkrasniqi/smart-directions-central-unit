@@ -29,20 +29,25 @@ class SmartDirectionInstance(SmartDirectionWrapperInstance):
         building: Building = self.get_building_from_id(id_building)
         return building.get_position_from_grid_number(position_in_grid, floor)
 
-    def add_node(self, id_building, mac, wifi):
-        b = [b for b in self.buildings if b.id == id_building][0]
+    def add_node(self, mac, wifi):
         wf_localizer = WifiLocalizer(self)
         id_building = wf_localizer.infer_building(wifi, [], False)
+        b = [b for b in self.buildings if b.id == id_building][0]
         floor = wf_localizer.infer_floor(wifi, [], id_building, False)
         position_in_grid = wf_localizer.infer_position(wifi, [], id_building, False)
         position = self.get_position_from_grid(id_building, position_in_grid, floor)
+        anchors = b.get_anchors(floor)
         try:
-            n = [n for n in b.nodes if n.mac == mac][0]
+            n = [n for n in anchors if n.mac == mac][0]
         except:
-            idx = len(b.nodes)
+            idx = b.get_new_anchor_id()
             n = Node(idx, position.x, position.y, position.z, "Ancora {}".format(idx), mac)
             b.addAnchor(position.z, n)
-        return n
+
+            from utils.parser import Parser
+            parser = Parser().getInstance()
+            parser.write_sd_buildings(self)
+        return {'id_node': n.idx, 'id_building': b.id}
 
     def initRouting(self):
         # TODO faccio routing di tutti i building. Poi dovrò aggiungere la navigazione extra

@@ -79,9 +79,16 @@ class Building(Position):
             [point.z for point in self.points]
 
         return min(x_arr), max(x_arr), min(y_arr), max(y_arr), min(z_arr), max(z_arr)
+    '''
+    Get floor range 
+    '''
+    def getFloorRange(self):
+        min_floor = 0
+        max_floor = self.floors.shape[0]
+        return min_floor, max_floor
 
     def size_floor(self):
-        minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals()
+        minX, maxX, minY, maxY, _, _ = self.getMinMaxVals()
         width, height = (maxX - minX) + 1, (maxY - minY) + 1
         return width, height
 
@@ -116,7 +123,14 @@ class Building(Position):
         x_lims = x_intervals[grid_number % len(x_intervals)]
         y_lims = y_intervals[grid_number // len(x_intervals)]
         # TODO in questi range, trovare uno spazio libero, possibilmente al centro; ad ora, forzo con il centro
-        x_val, y_val = (x_lims[0]+x_lims[1])//2, (y_lims[0]+y_lims[1])//2
+        start_x_val, start_y_val = (x_lims[0]+x_lims[1])//2, (y_lims[0]+y_lims[1])//2
+        #assert self.isValid(x_val, y_val, floor), "WRONG POSITION"
+        x_increases, y_increases = [1, -1, 0, 0, 1, -1, 1, -1], [0, 0, 1, -1, 1, 1, -1, -1]
+        x_val, y_val = start_x_val, start_y_val
+        i = 0
+        while i < len(x_increases) and not self.isValid(x_val, y_val, floor):
+            x_val, y_val = start_x_val + x_increases[i], start_y_val + y_increases[i]
+            i += 1
         assert self.isValid(x_val, y_val, floor), "WRONG POSITION"
         return Position(x_val, y_val, floor)
 
@@ -645,12 +659,14 @@ class Building(Position):
     Adds an anchor to the floor at the first available position
     '''
     def addAnchor(self, floor, anchor = None):
-        validCoordinates = self.findFirstValidCoordinate(floor)
+        if anchor is None:
+            validCoordinates = self.findFirstValidCoordinate(floor)
         anchors = self.anchors[floor]
         if anchor is None:
             anchor = Node(len(anchors), validCoordinates[0], validCoordinates[1], floor, "Ancora {}".format(len(anchors)), "RNDM")
+        x, y = anchor.x, anchor.y
         anchors.add(anchor)
-        self.floorsObjects[floor, validCoordinates[0], validCoordinates[1]] = PointType.ANCHOR
+        self.floorsObjects[floor, x, y] = PointType.ANCHOR
 
     '''
     Adds an effector to the floor at the first available position
@@ -796,11 +812,21 @@ class Building(Position):
                 points.append(Point3D(x, y, z_const, True))
         return points
 
+    def get_anchors(self, floor = None):
+        if floor is None:
+            return self.rawAnchors()
+        else:
+            return self.anchors[floor]
+
     def rawAnchors(self):
         anchors = []
         for row_anchors in self.anchors:
             anchors += row_anchors
         return anchors
+
+    def get_new_anchor_id(self):
+        num_anchors = len(self.rawAnchors())
+        return num_anchors
 
     def rawEffectors(self):
         effectors = []
