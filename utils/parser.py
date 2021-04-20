@@ -51,6 +51,10 @@ class Parser:
                 sd_instances = []
             return sd_instances
 
+        def clean_anchors(self, sd_instance):
+            sd_instance = self.read_sd_buildings(sd_instance)
+            sd_instance.clean_anchors()
+            self.write_sd_buildings(sd_instance)
         '''
         Get SmartDirection instance from ID
         '''

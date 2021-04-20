@@ -73,8 +73,11 @@ class Position(WithPosition):
         self.distanceMatrix = distanceMatrix
         self.distanceMatrix[np.where(self.distanceMatrix == -10)] = float("+inf")
 
-    def computePathList(self, position):
-        assert self.distanceMatrix is not None, "Init distance matrix first"
+    def computePathList(self, position, floors = None):
+        assert self.distanceMatrix is not None or floors is not None, "Init distance matrix first"
+        #assert self.distanceMatrix is not None, "Init distance matrix first"
+        if self.distanceMatrix is None:
+            self.updateDistanceMatrix(floors)
         currentPosition = SearchPosition(position, self.getDistance(position))
         path = [currentPosition]
         #alreadyVisited = set([currentPosition])
@@ -119,10 +122,25 @@ class Position(WithPosition):
         return isinstance(other, Position) and other.x == self.x and other.y == self.y and other.z == self.z
 
     @staticmethod
-    def computeHash(x, y, z, H=10000, W = 100000000):
-        return z + y * W + x * H
+    def computeHash(x, y, z, H=100, W = 10000):
+        return (z + y * W + x * H)
 
     def __hash__(self):
+        try:
+            self.x = self.x.item()
+        except:
+            # for some reason sometimes z is an int64 and hash is bothered...
+            pass
+        try:
+            self.y = self.y.item()
+        except:
+            # for some reason sometimes z is an int64 and hash is bothered...
+            pass
+        try:
+            self.z = self.z.item()
+        except:
+            # for some reason sometimes z is an int64 and hash is bothered...
+            pass
         return Position.computeHash(self.x, self.y, self.z)
 
     def left(self):

@@ -40,6 +40,11 @@ class PoI(Position):
             currentPosition = currentNeighbour
         return pathMatrix
 
+class PoIWithBuilding(PoI):
+    def __init__(self, poi: PoI, id_building: int):
+        PoI.__init__(self, poi.idx, poi.x, poi.y, poi.z, poi.name)
+        self.id_building = id_building
+
 class PoIs:
     def __init__(self, pois):
         self.pois = pois

@@ -24,3 +24,17 @@ class PointType(IntEnum):
     @staticmethod
     def isConnection(pointType):
         return 6 <= pointType <= 7
+
+class Direction(IntEnum):
+    TOP=1
+    RIGHT=2
+    BOTTOM=3
+    LEFT=4
+    ALL=5
+
+class MessageDirection(IntEnum):
+    FORWARD = 1
+    RIGHT = 2
+    BACK = 3
+    LEFT = 4
+    ARRIVED=5
