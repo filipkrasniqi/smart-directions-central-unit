@@ -14,9 +14,9 @@ It will compute the position and communicate it accordingly.
 class Localization:
 
     def rssiThreshold(self):
-        return -70
+        return -65
     def timeThreshold(self):
-        return 1000  # 10s expressed in ms
+        return 3000  # 10s expressed in ms
     def getType(self):
         pass
     def topic(self, effector: Effector):
@@ -69,34 +69,66 @@ class NodeLocalization(Localization):
         # TODO da ora in avanti, sarà meglio avere la SD instance, nel quale vengono controllati nuovamente tutti i nodi X devices
         # TODO per quanto riguarda l'activate, non la si fa più sul building ma sul sd_instance, in modo che se si è ai margini di un building si attiva ANCHE l'effettore d'inizio del building successivo -> navigazione EXTRA BUILDINGS
 
-        first_building = sd_instance.buildings[0]
+
         # filtering: only in case the device is navigating we compute the localization
         active_devices = [device for device in devices if
                           "status" in devices_dict[device] and devices_dict[device]["status"] == Status.NAVIGATING]
 
-        destination = first_building.pois[0][0] # TODO inserire la destinazione definita dall'utente. Ora è default la prima
-
         messages = []
-        for node, device in itertools.product(*[sd_instance.rawAnchors(), active_devices]):
+        close_anchors = {}
+        best_anchors = {}
+        # find first each pair (device, node)
+        for device in active_devices:
+            found, best_val = False, self.rssiThreshold()
+            closest_anchor = None
+            for node in sd_instance.raw_anchors():
+                current_vals = list(devices_dict[device][node.mac])
+                recent_values = list(map(lambda x: x["value"], filter(lambda x: x["timestamp"] + datetime.timedelta(0, self.timeThreshold()) > datetime.datetime.now(), current_vals)))
+                rssi_val = mean(recent_values)
+                if len(recent_values) > 0 and rssi_val > best_val:
+                    best_val = rssi_val
+                    closest_anchor = node
+            if closest_anchor is not None:
+                best_anchors[device] = closest_anchor
+
+        # for each device, use the closest anchor
+        for device in best_anchors.keys():
+            node = best_anchors[device]
+            device_building = [b for b in sd_instance.buildings if devices_dict[device]['id_building']==b.id][0]
+
+            device_destination = device_building.findPoI(devices_dict[device]['id_POI'])
+
             # check values that do not differ much in time
             if device in devices_dict and node.mac in devices_dict[device]:
                 current_vals = list(devices_dict[device][node.mac])
                 recent_values = list(map(lambda x: x["value"], filter(lambda x: x["timestamp"] + datetime.timedelta(0, self.timeThreshold()) > datetime.datetime.now(), current_vals)))
             else:
                 recent_values = []
-            # localization: node is close if threshold is greater than <rssiThreshold>
-            close = 1 if len(recent_values) > 0 and mean(recent_values) > self.rssiThreshold() else 0
-            # then, we activate the effectors that are close to it
-            effectors_to_activate = first_building.toActivate(node, destination)
-            if isinstance(effectors_to_activate, list):
-                for effector in effectors_to_activate:
-                    messages.append((effector, "{}${}".format(device, close)))
+            # localization: node is close if threshold is greater than <rssiThreshold> and no other node is close
+            if device in close_anchors:
+                close = 0
             else:
-                effector = effectors_to_activate
-                if effector is not None:
-                    messages.append((effector, "{}${}".format(device, close)))
+                close = 1 if len(recent_values) > 0 and mean(recent_values) > self.rssiThreshold() else 0
+            # then, we activate the effectors that are close to it
+            if close:
+                effectors_to_activate, face_to_show, relative_message_to_show = device_building.toActivate(node, device_destination)
+                if isinstance(effectors_to_activate, list):
+                    for effector in effectors_to_activate:
+                        messages.append((effector, "{}${}".format(device, close)))
                 else:
-                    print("NON HO EFFETTORI DA ATTIVARE")
+                    effector = effectors_to_activate
+                    if effector is not None:
+                        messages.append((effector, "{}$1${}${}".format(device, face_to_show, relative_message_to_show)))
+                        all_effectors = device_building.raw_effectors()
+                        for remaining_effector in all_effectors:
+                            if remaining_effector.idx != effector:
+                                messages.append(
+                                    (remaining_effector, "{}$0${}${}".format(device, face_to_show, relative_message_to_show)))
+                    else:
+                        print("NON HO EFFETTORI DA ATTIVARE")
+            else:
+                pass    # must not do anything
+
         return messages
     def getType(self):
         return LocalizationType.NODE
