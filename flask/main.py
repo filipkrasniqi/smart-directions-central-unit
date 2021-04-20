@@ -23,8 +23,7 @@ subscribers = {}
 parser = Parser(data_path).getInstance()
 
 
-def activate_sd_instance(id_sd, id_device):
-
+def activate_sd_instance(id_sd, id_device, id_building, id_POI):
     if id_sd not in subscribers:
         subscriberThread = MQTTSubscriber("MQTT", id_sd)
         subscriberThread.start()
@@ -32,9 +31,10 @@ def activate_sd_instance(id_sd, id_device):
     else:
         subscriberThread = subscribers[id_sd]
     # device gets tracked: needed to have info about anchors
-    if id_device not in id_sds:
+    if id_device != -1 and id_device not in id_sds:
         id_sds[id_device] = id_sd
-        subscriberThread.activate_device(id_device)
+    if id_building >= 0 and id_POI >= 0:
+        subscriberThread.activate_device(id_device, id_building, id_POI)
 
 
 @app.route('/device/sd_instances', methods=['GET'])
@@ -51,6 +51,14 @@ def building_list(id_sd):
     return jsonify(list(map(lambda b: {"idBuilding": b.id, "name": b.name, "num_floors": b.floorsObjects.shape[0],
                                        "width": b.floorsObjects.shape[1], "height": b.floorsObjects.shape[2],
                                        "invalid_points": b.getInvalidIndices()}, buildings)))
+
+@app.route('/device/<id_sd>/pois', methods=['GET'])
+def pois_list(id_sd):
+    # returns list of buildings
+    sd_instance = parser.read_smartdirections_instance((int(id_sd)))
+    pois = sd_instance.raw_pois()
+    return jsonify(list(map(lambda b: {"idPOI": b.idx, "name": b.name, 'idBuilding': b.id_building}, pois)))
+
 # TODO
 @app.route('/node/<mac_node>/init/', methods=['POST'])
 def init_node(mac_node):
@@ -63,14 +71,14 @@ def init_node(mac_node):
     id_sd, wifi = data["id_sd"], data["wifi"]
     instance: SmartDirectionInstance = parser.read_smartdirections_instance(id_sd)
 
-    to_return = instance.add_node(mac_node, wifi)
+    to_return = instance.add_node(mac_node.replace("\n", ""), wifi)
     return to_return
 
 @app.route('/device/<id_device>/activate/', methods=['POST'])
 def select_sd_instance(id_device):
     data = request.json
-    assert data is not None and data["id_sd"] is not None, "Wrong parameters"
-    activate_sd_instance(data["id_sd"], id_device)
+    assert data is not None and data["id_sd"] is not None and data["id_POI"] is not None and data["id_building"] is not None, "Wrong parameters"
+    activate_sd_instance(data["id_sd"], id_device, data["id_building"],data["id_POI"])
     return "OK"
 
 @app.route('/device/<id_device>/save', methods=['POST'])
@@ -142,4 +150,14 @@ def locate(id_device):
 
 
 if __name__ == "__main__":
+    force_clean = False
+    sd_instances = parser.read_smartdirections_instances()
+
+    if force_clean:
+        id_sds_to_clean = [0, 1]
+        sd_instances_to_clean = [s for s in sd_instances if s.id in id_sds_to_clean]
+        for sd_instance in sd_instances_to_clean:
+            parser.clean_anchors(sd_instance)
+    for sd_instance in sd_instances:
+        activate_sd_instance(sd_instance.id, id_device=-1, id_building=-1, id_POI=-1)
     app.run()
