@@ -50,18 +50,28 @@ class SmartDirectionInstance(SmartDirectionWrapperInstance):
         return {'id_node': n.idx, 'id_building': b.id}
 
     def initRouting(self):
-        # TODO faccio routing di tutti i building. Poi dovrò aggiungere la navigazione extra
+        # TODO aggiungere navigazione extra building
         for b in self.buildings:
             b.initRouting()
 
-    def rawAnchors(self):
+    def raw_anchors(self):
         anchors = []
         for b in self.buildings:
-            anchors += b.rawAnchors()
+            anchors += b.raw_anchors()
         return anchors
 
-    def rawEffectors(self):
+    def raw_effectors(self):
         effectors = []
         for b in self.buildings:
-            effectors += b.rawEffectors()
+            effectors += b.raw_effectors()
         return effectors
+
+    def raw_pois(self):
+        pois = []
+        for b in self.buildings:
+            pois += b.raw_pois()
+        return pois
+
+    def clean_anchors(self):
+        for b in self.buildings:
+            b.clean_anchors()
