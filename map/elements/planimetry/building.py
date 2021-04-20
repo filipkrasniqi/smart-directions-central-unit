@@ -7,8 +7,8 @@ from map.elements.effector import Effectors, Effector
 from map.elements.node import Node
 from map.elements.nodes import Nodes
 from map.elements.planimetry.point import Point3D, StairPoint3D, LiftPoint3D, ConnectionPoint3D
-from map.elements.planimetry.point_type import PointType
-from map.elements.poi import PoI, PoIs
+from map.elements.planimetry.point_type import PointType, Direction, MessageDirection
+from map.elements.poi import PoI, PoIs, PoIWithBuilding
 from map.elements.position import Position, PositionOnlinePath
 
 import bisect
@@ -436,10 +436,15 @@ class Building(Position):
         self.__computeStairConnections(z_given_floor)
 
         # self.floorsObjects is a list of masks defining, for the valid places, the objects (anchors, effectors, point of interest)
-        self.floorsObjects = np.zeros(shape=(self.numFloors, width, height))
-        self.anchors, self.effectors, self.pois = [Nodes([], None) for _ in range(self.numFloors)],\
-                                                  [Effectors([]) for _ in range(self.numFloors)],\
-                                                  [PoIs([]) for _ in range(self.numFloors)]
+        if self.floorsObjects is None:
+            self.floorsObjects = np.zeros(shape=(self.numFloors, width, height))
+        if self.anchors is None:
+            self.anchors = [Nodes([], None) for _ in range(self.numFloors)]
+        if self.effectors is None:
+            self.effectors = [Effectors([]) for _ in range(self.numFloors)]
+        if self.pois is None:
+            self.pois = [PoIs([]) for _ in range(self.numFloors)]
+
 
     '''
     Builds the routing table for SD purposes.
@@ -461,7 +466,7 @@ class Building(Position):
         pois = [poi for poi in [poisAtLevel for poisAtLevel in self.pois]]
         anchors = [anchor for anchor in [anchorsAtLevel for anchorsAtLevel in self.anchors]]
         for poi, anchor in itertools.product(*[pois, anchors]):
-            path = poi.computePathList(anchor)
+            path = poi.computePathList(anchor, self.floors)
             # TODO here I should check the level: should I return the value when computing the path???
             nextAnchor = self.getObjectInPath(level, path, PointType.ANCHOR)
             # anchor is assigned iff there exists something in the middle. If not, it assigns the poi
@@ -525,32 +530,101 @@ class Building(Position):
         assert self.floorsObjects[floor][position.x, position.y] == PointType.POI, "Wrong object"
         return self.getObjectAt(floor, position.getCoordinates())
 
-    '''
-    Given start position and destination to reach (a PoI)
-    Returns the effector to activate
-    '''
-    def toActivateSameFloor(self, position: Position, destination: Position, numFloor):
-        poi: PoI = self.getPoi(destination)
-        path = poi.computePathList(position)
-        effectorToActivate = self.getObjectInPath(numFloor, path, PointType.EFFECTOR)
-        return effectorToActivate
+    def findClosestEffector(self, floor, destination: Position):
+        distances_current_floor = [destination.getDistance(e) for e in self.effectors[floor]]
+        return self.effectors[floor][np.argmin(distances_current_floor)]
 
     def toActivate(self, start: Position, destination: Position):
+        floor = start.z
         if start.isSameFloor(destination):
-            path = destination.computePathList(start)
-            effectorToActivate = self.getObjectInPath(start.z, path, PointType.EFFECTOR)
+            path = destination.computePathList(start, self.floors)
+            # reverse it: I want to know path from anchor to poi
+            effectorToActivate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
         else:
-            pivots = self.pivots[start.z]
+            pivots = self.pivots[floor]
             distances = [pivot.getPosition().getDistance(start) + self.distanceMatrixPoiPivot.get(
                 "{}_{}".format(destination.__hash__(), pivot.__hash__())) for pivot in pivots]
             pivotIdx = np.argmin(distances)
             pivot = pivots[pivotIdx].getPosition()
-            path = pivot.computePathList(start)
-            effectorToActivate = self.getObjectInPath(start.z, path, PointType.EFFECTOR)
-        if effectorToActivate is None:
-            print("WARNING: effettore non presente")
-        # TODO we should retrieve the direction depending on <whatever>
-        return effectorToActivate
+            path = pivot.computePathList(start, self.floors)
+            effectorToActivate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
+
+        # check if we arrived at destination
+        if not effectorToActivate or effectorToActivate is None:
+            effectorToActivate = self.findClosestEffector(floor, destination)
+            face_to_show, relative_message_to_show = Direction.ALL, MessageDirection.ARRIVED
+        else:
+            # finding face to activate: depends on  history directions
+            if len(history_directions) > 0:
+                direction_face = Direction(np.argmax(np.bincount(history_directions)))
+            else:
+                print("WARNING: no history directions")
+                direction_face = 0
+            # compute the directions with the remaining path
+            i = 0
+            THRESHOLD_NEXT = 2
+            next_directions = []
+            remaining_path = destination.computePathList(effectorToActivate, self.floors)
+            while i+1 < min(len(remaining_path), THRESHOLD_NEXT):
+                currentPosition = remaining_path[i]
+                nextPosition = remaining_path[i+1]
+                # compute the direction
+                xDiffer, yDiffer = currentPosition.x != nextPosition.x, currentPosition.y != nextPosition.y
+                right, top = currentPosition.x < nextPosition.x, currentPosition.y < nextPosition.y
+                if xDiffer:
+                    if right:
+                        next_directions.append(Direction.RIGHT)
+                    else:
+                        next_directions.append(Direction.LEFT)
+                else:
+                    if top:
+                        next_directions.append(Direction.TOP)
+                    else:
+                        next_directions.append(Direction.BOTTOM)
+                    # remove, given the direction, the limits given by the map
+                i += 1
+
+            # finding message to show: depends on history directions of the remaining path
+            if len(next_directions) > 0:
+                absolute_message_to_show = Direction(np.argmax(np.bincount(next_directions)))
+            else:
+                print("WARNING: no next directions")
+                absolute_message_to_show = 0
+
+            dict_faces = {
+                Direction.TOP: Direction.BOTTOM,
+                Direction.BOTTOM: Direction.TOP,
+                Direction.RIGHT: Direction.LEFT,
+                Direction.LEFT: Direction.RIGHT,
+            }
+
+            face_to_show = dict_faces[direction_face]
+
+            dict_messages = {
+                Direction.TOP: {
+                    Direction.TOP: MessageDirection.BACK,
+                    Direction.RIGHT: MessageDirection.LEFT,
+                    Direction.BOTTOM: MessageDirection.FORWARD,
+                    Direction.LEFT: MessageDirection.RIGHT
+                },Direction.RIGHT: {
+                    Direction.TOP: MessageDirection.RIGHT,
+                    Direction.RIGHT: MessageDirection.BACK,
+                    Direction.BOTTOM: MessageDirection.LEFT,
+                    Direction.LEFT: MessageDirection.FORWARD
+                },Direction.BOTTOM: {
+                    Direction.TOP: MessageDirection.FORWARD,
+                    Direction.RIGHT: MessageDirection.RIGHT,
+                    Direction.BOTTOM: MessageDirection.BACK,
+                    Direction.LEFT: MessageDirection.LEFT
+                },Direction.LEFT: {
+                    Direction.TOP: MessageDirection.LEFT,
+                    Direction.RIGHT: MessageDirection.FORWARD,
+                    Direction.BOTTOM: MessageDirection.RIGHT,
+                    Direction.LEFT: MessageDirection.BACK
+                }
+            }
+            relative_message_to_show = dict_messages[face_to_show][absolute_message_to_show]
+        return effectorToActivate, face_to_show, relative_message_to_show
 
     '''
     Return the indoor / outdoor mask for the points indoor / outdoor
@@ -704,12 +778,16 @@ class Building(Position):
     '''
     Given floor, path in the floor and object type (e.g.: effector) to check
     Returns the object instance.
+    TODO now it is implemented in s.w.t. it will find only one type of object; with this assumption, we have to insert an effector at the POI position or similar. 
+            In any case we need to check if a POI is reached
+            
     TODO should be updated with the multilevel concept
     '''
-    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 2):
+    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 1, threshold_history = 1):
         floor = self.floorsObjects[numFloor]
         width, height = floor.shape
         i, objectToRetrieve = 0, False
+        history_directions = []
         while not objectToRetrieve and i < len(path):
             currentPosition = path[i]
             # improving the algorithm by checking the next direction: we don't want to check objs that were located in previous part of the path
@@ -723,13 +801,17 @@ class Building(Position):
                 if xDiffer:
                     if right:
                         minX = currentPosition.x
+                        history_directions.append(Direction.RIGHT)
                     else:
                         maxX = currentPosition.x
+                        history_directions.append(Direction.LEFT)
                 else:
                     if top:
                         minY = currentPosition.y
+                        history_directions.append(Direction.TOP)
                     else:
                         maxY = currentPosition.y
+                        history_directions.append(Direction.BOTTOM)
                 # remove, given the direction, the limits given by the map
                 minX, maxX, minY, maxY = max(0, minX), min(width, maxX), max(0, minY), min(height, maxY)
             else:
@@ -743,7 +825,15 @@ class Building(Position):
                 objectToRetrieve = self.getObjectAt(numFloor, (cols[0]+minX, rows[0]+minY))
             else:
                 i += 1
-        return objectToRetrieve
+
+        if objectType == PointType.EFFECTOR or objectType == PointType.POI:
+            #history_directions = path[:i]
+            remaining_path = path[i:]
+            if len(history_directions) > threshold_history:
+                history_directions = history_directions[i-threshold_history:]
+            return objectToRetrieve, history_directions, remaining_path
+        else:
+            return objectToRetrieve
 
     '''
     Given a floor and the position (i,j), returns the object type at that position.
@@ -814,21 +904,33 @@ class Building(Position):
 
     def get_anchors(self, floor = None):
         if floor is None:
-            return self.rawAnchors()
+            return self.raw_anchors()
         else:
             return self.anchors[floor]
 
-    def rawAnchors(self):
+    def clean_anchors(self):
+        self.anchors = [Nodes([], None) for _ in range(self.numFloors)]
+        idxs = self.floorsObjects==PointType.ANCHOR
+        self.floorsObjects[idxs] = self.floors[idxs]
+
+    def raw_pois(self):
+        pois = []
+        for row_pois in self.pois:
+            for p in row_pois:
+                pois.append(PoIWithBuilding(p, self.id))
+        return pois
+
+    def raw_anchors(self):
         anchors = []
         for row_anchors in self.anchors:
             anchors += row_anchors
         return anchors
 
     def get_new_anchor_id(self):
-        num_anchors = len(self.rawAnchors())
+        num_anchors = len(self.raw_anchors())
         return num_anchors
 
-    def rawEffectors(self):
+    def raw_effectors(self):
         effectors = []
         for row_effectors in self.effectors:
             effectors += row_effectors
@@ -842,3 +944,6 @@ class Building(Position):
             dict_invalids[invalid[0]].append({"x": int(point_xy[0]), "y": int(point_xy[1])})
         return dict_invalids
 
+    def findPoI(self, idx_poi):
+        pois = self.raw_pois()
+        return [p for p in pois if p.idx == idx_poi][0]
