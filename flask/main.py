@@ -59,8 +59,7 @@ def pois_list(id_sd):
     pois = sd_instance.raw_pois()
     return jsonify(list(map(lambda b: {"idPOI": b.idx, "name": b.name, 'idBuilding': b.id_building}, pois)))
 
-# TODO
-@app.route('/node/<mac_node>/init/', methods=['POST'])
+@app.route('/node/<mac_node>/init', methods=['POST'])
 def init_node(mac_node):
 
     data = request.json
@@ -74,7 +73,11 @@ def init_node(mac_node):
     to_return = instance.add_node(mac_node.replace("\n", ""), wifi)
     return to_return
 
-@app.route('/device/<id_device>/activate/', methods=['POST'])
+@app.route('/node/<mac_node>/ping', methods=['POST'])
+def ping_from_node(mac_node):
+    return "OK"
+
+@app.route('/device/<id_device>/activate', methods=['POST'])
 def select_sd_instance(id_device):
     data = request.json
     assert data is not None and data["id_sd"] is not None and data["id_POI"] is not None and data["id_building"] is not None, "Wrong parameters"
