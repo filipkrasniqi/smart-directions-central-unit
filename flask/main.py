@@ -50,7 +50,8 @@ def building_list(id_sd):
     buildings = sd_instance.buildings
     return jsonify(list(map(lambda b: {"idBuilding": b.id, "name": b.name, "num_floors": b.floorsObjects.shape[0],
                                        "width": b.floorsObjects.shape[1], "height": b.floorsObjects.shape[2],
-                                       "invalid_points": b.getInvalidIndices()}, buildings)))
+                                       "invalid_points": b.getInvalidIndices(),
+                                       "id_pois": [p.idx for p in b.raw_pois()]}, buildings)))
 
 @app.route('/device/<id_sd>/pois', methods=['GET'])
 def pois_list(id_sd):
@@ -87,7 +88,7 @@ def select_sd_instance(id_device):
 @app.route('/device/<id_device>/save', methods=['POST'])
 def save_mac_position(id_device):
     data = request.json
-    assert data is not None and data["wifi"] is not None and data["id_building"] is not None and data["id_sd"] is not None and data["position"] is not None and data["position"][
+    assert data is not None and data["wifi"] is not None and data["id_building"] is not None and data["id_POI"] is not None and data["id_sd"] is not None and data["position"] is not None and data["position"][
         "x"] is not None and data["position"]["y"] is not None and data["position"]["z"] is not None, "Wrong parameters"
     for wifi in data["wifi"]:
         assert wifi["mac"] is not None and wifi["rssi"] is not None, "Wrong wifi info: {}".format(wifi)
@@ -96,17 +97,18 @@ def save_mac_position(id_device):
         id_sd = id_sds[id_device]
     except:
         id_sd = data['id_sd']
-        activate_sd_instance(id_sd, id_device)
+        # now it is useless to activate it...
+        activate_sd_instance(id_sd, id_device, data['id_building'], data['id_POI'])
     subscriberThread = subscribers[id_sd]
     ble = subscriberThread.device_rssi(id_device)
-    parser.save_wifi_rssi(id_sd, data["id_building"], data["wifi"], data["position"], ble)
-    return "OK"
+    parser.save_wifi_rssi(id_sd, data["id_building"], data["wifi"], data["position"], ble, also_ble=False)
+    return jsonify({})
 
 
 @app.route('/device/<id_device>/locate', methods=['POST'])
 def locate(id_device):
     data = request.json
-    assert data is not None and data["wifi"] is not None and data["id_sd"] is not None and data["id_building"] is not None, "Wrong parameters"
+    assert data is not None and data["wifi"] is not None and data["floor"] is not None and data["id_POI"] is not None and data["id_sd"] is not None and data["id_building"] is not None, "Wrong parameters"
     for wifi in data["wifi"]:
         assert wifi["mac"] is not None and wifi["rssi"] is not None, "Wrong wifi info: {}".format(wifi)
     # asserted we have {wifi: [{mac: <>, rssi: <>}, ...], position: ...}
@@ -114,42 +116,17 @@ def locate(id_device):
         id_sd = id_sds[id_device]
     except:
         id_sd = data['id_sd']
-        activate_sd_instance(id_sd, id_device)
-    subscriberThread = subscribers[id_sd]
-    ble = subscriberThread.device_rssi(id_device)
+        # now it is useless to activate it...
+        activate_sd_instance(id_sd, id_device, data['id_building'], data['id_POI'])
 
-    also_ble = True
-    prefix_ble = ""
-    if also_ble:
-        prefix_ble = "_ble"
-    name = "wifi" + prefix_ble
+    sd_instance = parser.read_smartdirections_instance(id_sd)
+    wf_localizer = WifiLocalizer(sd_instance)
+    id_building = wf_localizer.infer_building(data['wifi'], [], False)
+    floor = wf_localizer.infer_floor(data['wifi'], [], id_building, False)
+    position_in_grid = wf_localizer.infer_position(data['wifi'], [], id_building, False)
+    x_intervals, y_intervals = wf_localizer.get_intervals(id_building)
 
-    model_name = "nb"
-
-    model = parser.load_building_model(id_sd, data['id_building'], model_name, name)
-    df = parser.read_df_building(id_sd, data['id_building'])
-    wifi_cols = [col for col in df.columns if "wifi" in col]
-    features = []
-    for wifi_col in wifi_cols:
-        rssi_vals = [wifi['rssi'] for wifi in data['wifi'] if "wifi_{}".format(wifi['mac']) == wifi_col]
-        rssi = -120
-        if len(rssi_vals) > 0:
-            rssi = rssi_vals[0]
-        features.append(rssi)
-    if also_ble:
-        ble_cols = [col for col in df.columns if "ble" in col and "rndm" not in col]
-        for ble_col in ble_cols:
-            TIME_THRESHOLD = 3  # 3 seconds of threshold: if the difference is higher I don't take them
-            ble_mac = ble_col.split("_")[1]
-            recent_values = [b_val["value"] for b_val in ble[ble_mac]
-                             if b_val["timestamp"] + datetime.timedelta(0, seconds=TIME_THRESHOLD) >
-                             datetime.datetime.now()]
-            if len(recent_values) <= 0:
-                recent_values = [-100]
-            features.append(mean(recent_values))
-
-    position = model.predict(np.array(features).reshape(1, -1))
-    return jsonify({"position": int(position[0])})
+    return jsonify({"position": position_in_grid.item(), 'id_building': id_building.item(), 'floor' : floor.item(), 'x_intervals': x_intervals, 'y_intervals': y_intervals})
 
 
 if __name__ == "__main__":
