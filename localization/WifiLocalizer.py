@@ -118,15 +118,19 @@ class WifiLocalizer:
         print("CNN SCORE for {} -> {}".format(name, mean(scores)))
 
     def __get_position(self, x, y, id_building):#min_x = 0, max_x = 12, min_y = 0, max_y = 14):
+        x_intervals, y_intervals = self.get_intervals(id_building)
+
+        x_block = [i for i, interval in enumerate(x_intervals) if interval[0] <= x <= interval[1]][0]
+        y_block = [i for i, interval in enumerate(y_intervals) if interval[0] <= y <= interval[1]][0]
+
+        return x_block + y_block * len(x_intervals)
+
+    def get_intervals(self, id_building):
         building: Building = self.sd_instance.get_building_from_id(id_building)
         x_intervals = building.horizontal_grid_intervals()
         y_intervals = building.vertical_grid_intervals()
 
-        x_block = [i for i, interval in enumerate(x_intervals) if interval[0] <= x <= interval[1]][0]
-        y_block = [i for i, interval in enumerate(y_intervals) if interval[0] <= y <= interval[1]][0]
-        #max_x_block, max_y_block = max(x_block), max(y_block)
-
-        return x_block + y_block * len(x_intervals)
+        return x_intervals, y_intervals
 
     def infer_floor(self, wifi_features, ble_features, id_building, also_ble = True):
         model = self.models_building_floor[id_building]
