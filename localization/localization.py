@@ -84,8 +84,10 @@ class NodeLocalization(Localization):
             for node in sd_instance.raw_anchors():
                 current_vals = list(devices_dict[device][node.mac])
                 recent_values = list(map(lambda x: x["value"], filter(lambda x: x["timestamp"] + datetime.timedelta(0, self.timeThreshold()) > datetime.datetime.now(), current_vals)))
-                rssi_val = mean(recent_values)
-                if len(recent_values) > 0 and rssi_val > best_val:
+                rssi_val = -100
+                if len(recent_values) > 0:
+                    rssi_val = mean(recent_values)
+                if rssi_val > best_val:
                     best_val = rssi_val
                     closest_anchor = node
             if closest_anchor is not None:
