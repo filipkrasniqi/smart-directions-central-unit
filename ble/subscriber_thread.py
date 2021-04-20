@@ -18,7 +18,6 @@ from utils.parser import Parser
 
 BROKER_IP = "80.211.69.17"    # "192.168.1.151" # my laptop
 
-# TODO associarlo ad una SD instance, non ad un building
 class MQTTSubscriber(LogThread):
     client: mqtt.Client
     devices_dict = {}   # dictionary of the form: {mac: {origin: <rssi_queue>}}, being mac = <device sniffed>, origin = <sniffer> (rberry pi)
@@ -38,15 +37,19 @@ class MQTTSubscriber(LogThread):
 
     def on_activate(self, client, userdata, msg):
         key = msg.topic.split("/")[-1].lower()
-        self.activate_device(key)
+        id_POI, id_building, key = msg.payload.decode('utf-8').split("$")
+        self.activate_device(key, int(id_building), int(id_POI))
 
-    def activate_device(self, key):
+    def activate_device(self, key, id_building, id_POI):
         if key not in self.devices_dict:
             self.devices_dict[key] = {}
         for origin in self.anchors():
             if origin.mac not in self.devices_dict[key]:
-                self.devices_dict[key][origin.mac] = collections.deque(self.QUEUE_LENGTH * [{"timestamp": datetime.datetime.now(), "value": -100}], self.QUEUE_LENGTH)
+                mac_anchor = origin.mac.replace("\n", "")
+                self.devices_dict[key][mac_anchor] = collections.deque(self.QUEUE_LENGTH * [{"timestamp": datetime.datetime.now(), "value": -100}], self.QUEUE_LENGTH)
         self.devices_dict[key]["status"] = Status.NAVIGATING
+        self.devices_dict[key]['id_building']= id_building
+        self.devices_dict[key]['id_POI']= id_POI
 
     def on_deactivate(self, client, userdata, msg):
         key = msg.topic.split("/")[-1].lower()
@@ -54,10 +57,10 @@ class MQTTSubscriber(LogThread):
             self.devices_dict[key]["status"] = Status.INACTIVE
 
     def anchors(self):
-        return self.sd_instance.rawAnchors()
+        return self.sd_instance.raw_anchors()
 
     def effectors(self):
-        return self.sd_instance.rawEffectors()
+        return self.sd_instance.raw_effectors()
 
     @staticmethod
     def local_ip():
@@ -67,14 +70,17 @@ class MQTTSubscriber(LogThread):
     def on_rssi_received(self, client, userdata, msg):
         splits = str(msg.payload).split("$")
         origin = msg.topic.split("/")[-1]
-        if len(splits) >= 2:
-            if len(splits) == 3:
-                mac, rssi, device_id = splits
+        if len(splits) >= 3:
+            if len(splits) == 4:
+                # TODO check if this part is useful anymore: we have beacon ID that is universal
+                mac, rssi, timestamp, device_id = splits
                 mac = mac.lower()
+                device_id = device_id[:-1] # removing \n added by c++ code to have char*
                 key = device_id.lower()
             else:
-                mac, rssi = splits
+                mac, rssi, timestamp = splits
                 mac = mac.lower()[2:]
+                timestamp = timestamp[:-1] # removing \n added by c++ code to have char*
                 key = mac
             if origin not in self.log_nodes_dict:
                 self.log_nodes_dict.update({origin:[]})
@@ -82,23 +88,21 @@ class MQTTSubscriber(LogThread):
 
             # 'fa:03:63:cb:09:03'
             possible_devs = ['fa:03:63:cb:09:03']
-            if abs(int(rssi[:-1])) < 65 and key not in possible_devs:
-                pass
             # checking that it actually exists
             if key in self.devices_dict:
                 # checking that node exists
                 if origin in [node.mac.replace("\n", "").lower() for node in self.anchors()]:
-                    rssi = rssi[:-1]    # removing \n added by c++ code to have char*
                     # finally adding rssi
                     try:
                         rssi = int(rssi)
-                        self.devices_dict[key][origin].append({"timestamp": datetime.datetime.now(), "value": rssi})
+                        self.devices_dict[key][origin].append({"timestamp": datetime.datetime.fromtimestamp(int(timestamp)), "value": rssi})
                     except:
                         self.errorLog("Unable to parse")
                 else:
                     self.log("Unknown node")
             else:
-                self.log("Unknown device communicating")
+                pass
+                #self.log("Unknown device communicating")
         else:
             self.errorLog("Unable to split")
 
