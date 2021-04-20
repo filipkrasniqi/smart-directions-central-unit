@@ -142,26 +142,27 @@ class Parser:
             path_sd = self.path_sd(id_sd)
             return "{}model_{}_{}.joblib".format(path_sd, model, name)
 
-        def save_wifi_rssi(self, id_sd, id_building, wifi, position, ble):
+        def save_wifi_rssi(self, id_sd, id_building, wifi, position, ble, also_ble=False):
             path_dataset = self.get_filename_dataset_wifi(id_sd, id_building)
             df = self.read_df_building(id_sd, id_building)
-            df_dict = df.to_dict('records')
+            df_dict = df.reset_index().to_dict('records')
             to_add = {"wifi_{}".format(wf["mac"]): wf["rssi"] for wf in wifi}
             to_add['x'] = position["x"]
             to_add['y'] = position["y"]
             to_add['z'] = position["z"]
             to_add['id_building'] = id_building
 
-            # add the ble info
-            for node_mac_address in ble:
-                if node_mac_address != "status" and "rndm" not in node_mac_address:
-                    TIME_THRESHOLD = 3  # 3 seconds of threshold: if the difference is higher I don't take them
-                    recent_values = [b_val["value"] for b_val in ble[node_mac_address]
-                                     if b_val["timestamp"] + datetime.timedelta(0, seconds=TIME_THRESHOLD) >
-                                     datetime.datetime.now()]
-                    if len(recent_values) <= 0:
-                        recent_values = [-100]
-                    to_add["ble_{}".format(node_mac_address)] = mean(recent_values)
+            if also_ble:
+                # add the ble info
+                for node_mac_address in ble:
+                    if node_mac_address != "status" and "rndm" not in node_mac_address:
+                        TIME_THRESHOLD = 3  # 3 seconds of threshold: if the difference is higher I don't take them
+                        recent_values = [b_val["value"] for b_val in ble[node_mac_address]
+                                         if b_val["timestamp"] + datetime.timedelta(0, seconds=TIME_THRESHOLD) >
+                                         datetime.datetime.now()]
+                        if len(recent_values) <= 0:
+                            recent_values = [-100]
+                        to_add["ble_{}".format(node_mac_address)] = mean(recent_values)
             to_add['date'] = pd.to_datetime("today")
             df_dict.append(to_add)
             df = pd.DataFrame(df_dict)

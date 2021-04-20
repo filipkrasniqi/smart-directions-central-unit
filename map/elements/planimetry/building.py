@@ -97,13 +97,18 @@ class Building(Position):
 
     @staticmethod
     def grid_intervals(num, size, begin):
-        num_parts = num // size
-        remaining = [size + 1] * (num - num_parts * size)
-        cell_sizes = remaining + [size] * num_parts
+        n = num//size
+        if n*size != num:
+            n += 1
+            max_n = n*size
+            remaining = max_n-num
+            cell_sizes = remaining*[size-1] + (n-remaining) * [size]
+        else:
+            cell_sizes = [size]*n
         intervals, start_point = [], begin
         for cell_size in cell_sizes:
-            intervals.append((start_point, start_point + cell_size))
-            start_point += cell_size
+            intervals.append((start_point, start_point + cell_size - 1))
+            start_point += min(cell_size, num-1)
         return intervals
 
     def horizontal_grid_intervals(self):
