@@ -26,7 +26,7 @@ class Building(Position):
     def __init__(self, **kwargs):
         self.id, x, y, z, points, name = \
             kwargs.get('id', -1), kwargs.get('x', 0), kwargs.get('y', 0), kwargs.get('z', 0), \
-            kwargs.get('points', Building.home_planimetry()), kwargs.get('name', "")
+            kwargs.get('points', Building.antlab_planimetry()), kwargs.get('name', "")
         Position.__init__(self, x, y, z, name)
         self.connections, self.floors, self.floorsObjects, self.anchors, self.effectors, self.pois = \
             None, None, None, None, None, None
@@ -544,7 +544,7 @@ class Building(Position):
         if start.isSameFloor(destination):
             path = destination.computePathList(start, self.floors)
             # reverse it: I want to know path from anchor to poi
-            effectorToActivate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
+            effector_to_activate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
         else:
             pivots = self.pivots[floor]
             distances = [pivot.getPosition().getDistance(start) + self.distanceMatrixPoiPivot.get(
@@ -552,11 +552,11 @@ class Building(Position):
             pivotIdx = np.argmin(distances)
             pivot = pivots[pivotIdx].getPosition()
             path = pivot.computePathList(start, self.floors)
-            effectorToActivate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
+            effector_to_activate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
 
         # check if we arrived at destination
-        if not effectorToActivate or effectorToActivate is None:
-            effectorToActivate = self.findClosestEffector(floor, destination)
+        if not effector_to_activate or effector_to_activate is None:
+            effector_to_activate = self.findClosestEffector(floor, destination)
             face_to_show, relative_message_to_show = Direction.ALL, MessageDirection.ARRIVED
         else:
             # finding face to activate: depends on  history directions
@@ -567,9 +567,9 @@ class Building(Position):
                 direction_face = 0
             # compute the directions with the remaining path
             i = 0
-            THRESHOLD_NEXT = 2
+            THRESHOLD_NEXT = 3
             next_directions = []
-            remaining_path = destination.computePathList(effectorToActivate, self.floors)
+            remaining_path = destination.computePathList(effector_to_activate, self.floors)
             while i+1 < min(len(remaining_path), THRESHOLD_NEXT):
                 currentPosition = remaining_path[i]
                 nextPosition = remaining_path[i+1]
@@ -599,8 +599,8 @@ class Building(Position):
             dict_faces = {
                 Direction.TOP: Direction.BOTTOM,
                 Direction.BOTTOM: Direction.TOP,
-                Direction.RIGHT: Direction.LEFT,
-                Direction.LEFT: Direction.RIGHT,
+                Direction.LEFT: Direction.LEFT,
+                Direction.RIGHT: Direction.RIGHT,
             }
 
             face_to_show = dict_faces[direction_face]
@@ -608,28 +608,28 @@ class Building(Position):
             dict_messages = {
                 Direction.TOP: {
                     Direction.TOP: MessageDirection.BACK,
-                    Direction.RIGHT: MessageDirection.LEFT,
+                    Direction.RIGHT: MessageDirection.RIGHT,
                     Direction.BOTTOM: MessageDirection.FORWARD,
-                    Direction.LEFT: MessageDirection.RIGHT
+                    Direction.LEFT: MessageDirection.LEFT
                 },Direction.RIGHT: {
                     Direction.TOP: MessageDirection.RIGHT,
-                    Direction.RIGHT: MessageDirection.BACK,
+                    Direction.RIGHT: MessageDirection.FORWARD,
                     Direction.BOTTOM: MessageDirection.LEFT,
-                    Direction.LEFT: MessageDirection.FORWARD
+                    Direction.LEFT: MessageDirection.BACK
                 },Direction.BOTTOM: {
                     Direction.TOP: MessageDirection.FORWARD,
-                    Direction.RIGHT: MessageDirection.RIGHT,
+                    Direction.RIGHT: MessageDirection.LEFT,
                     Direction.BOTTOM: MessageDirection.BACK,
-                    Direction.LEFT: MessageDirection.LEFT
+                    Direction.LEFT: MessageDirection.RIGHT
                 },Direction.LEFT: {
                     Direction.TOP: MessageDirection.LEFT,
-                    Direction.RIGHT: MessageDirection.FORWARD,
+                    Direction.RIGHT: MessageDirection.BACK,
                     Direction.BOTTOM: MessageDirection.RIGHT,
-                    Direction.LEFT: MessageDirection.BACK
+                    Direction.LEFT: MessageDirection.FORWARD
                 }
             }
             relative_message_to_show = dict_messages[face_to_show][absolute_message_to_show]
-        return effectorToActivate, face_to_show, relative_message_to_show
+        return effector_to_activate, face_to_show, relative_message_to_show
 
     '''
     Return the indoor / outdoor mask for the points indoor / outdoor
@@ -740,6 +740,8 @@ class Building(Position):
     def addAnchor(self, floor, anchor = None):
         if anchor is None:
             validCoordinates = self.findFirstValidCoordinate(floor)
+        else:
+            validCoordinates = anchor.x, anchor.y
         anchors = self.anchors[floor]
         if anchor is None:
             anchor = Node(len(anchors), validCoordinates[0], validCoordinates[1], floor, "Ancora {}".format(len(anchors)), "RNDM")
@@ -788,7 +790,7 @@ class Building(Position):
             
     TODO should be updated with the multilevel concept
     '''
-    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 1, threshold_history = 1):
+    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 2, threshold_history = 1):
         floor = self.floorsObjects[numFloor]
         width, height = floor.shape
         i, objectToRetrieve = 0, False
@@ -855,7 +857,7 @@ class Building(Position):
         val1 = self.floorsObjects[numFloor, i, j]
         val2 = self.floors[numFloor, i, j]
         val3 = self.connections[numFloor, i, j]
-        return (val1, val2, val3)
+        return val1, val2, val3
 
     '''
     Returns the number of floors of the building
@@ -905,6 +907,36 @@ class Building(Position):
         for x in range(11, 13):
             for y in range(11, 15):
                 points.append(Point3D(x, y, z_const, True))
+        return points
+
+    @staticmethod
+    def antlab_planimetry():
+        points: list[Point3D] = []
+        z_const = 1
+        # primo corridoio
+        for x in range(0, 12):
+            for y in range(0, 2):
+                points.append(Point3D(x, y, z_const, True))
+        # secondo corridoio
+        for x in range(0, 12):
+            for y in range(4, 6):
+                points.append(Point3D(x, y, z_const, True))
+        # terzo corridoio
+        for x in range(0, 12):
+            for y in range(8, 10):
+                points.append(Point3D(x, y, z_const, True))
+        # corridoio verticale
+        for x in range(5, 7):
+            for y in range(0, 10):
+                points.append(Point3D(x, y, z_const, True))
+
+        for x in range(0, 12):
+            for y in range(11, 14):
+                points.append(Point3D(x, y, z_const, True))
+
+        # porte
+        points.append(Point3D(1, 10, z_const, True))
+        points.append(Point3D(2, 10, z_const, True))
         return points
 
     def get_anchors(self, floor = None):
