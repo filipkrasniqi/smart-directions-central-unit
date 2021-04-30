@@ -14,9 +14,9 @@ It will compute the position and communicate it accordingly.
 class Localization:
 
     def rssiThreshold(self):
-        return -65
+        return -50
     def timeThreshold(self):
-        return 3000  # 10s expressed in ms
+        return 2000  # 3s expressed in ms
     def getType(self):
         pass
     def topic(self, effector: Effector):
@@ -107,29 +107,21 @@ class NodeLocalization(Localization):
             else:
                 recent_values = []
             # localization: node is close if threshold is greater than <rssiThreshold> and no other node is close
-            if device in close_anchors:
-                close = 0
+            effectors_to_activate, face_to_show, relative_message_to_show = device_building.toActivate(node, device_destination)
+            if isinstance(effectors_to_activate, list):
+                for effector in effectors_to_activate:
+                    messages.append((effector, "{}${}".format(device, 1)))
             else:
-                close = 1 if len(recent_values) > 0 and mean(recent_values) > self.rssiThreshold() else 0
-            # then, we activate the effectors that are close to it
-            if close:
-                effectors_to_activate, face_to_show, relative_message_to_show = device_building.toActivate(node, device_destination)
-                if isinstance(effectors_to_activate, list):
-                    for effector in effectors_to_activate:
-                        messages.append((effector, "{}${}".format(device, close)))
+                effector = effectors_to_activate
+                if effector is not None:
+                    messages.append((effector, "{}$1${}${}".format(device, face_to_show, relative_message_to_show)))
+                    all_effectors = device_building.raw_effectors()
+                    for remaining_effector in all_effectors:
+                        if remaining_effector.idx != effector:
+                            messages.append(
+                                (remaining_effector, "{}$0${}${}".format(device, face_to_show, relative_message_to_show)))
                 else:
-                    effector = effectors_to_activate
-                    if effector is not None:
-                        messages.append((effector, "{}$1${}${}".format(device, face_to_show, relative_message_to_show)))
-                        all_effectors = device_building.raw_effectors()
-                        for remaining_effector in all_effectors:
-                            if remaining_effector.idx != effector:
-                                messages.append(
-                                    (remaining_effector, "{}$0${}${}".format(device, face_to_show, relative_message_to_show)))
-                    else:
-                        print("NON HO EFFETTORI DA ATTIVARE")
-            else:
-                pass    # must not do anything
+                    print("NON HO EFFETTORI DA ATTIVARE")
 
         return messages
     def getType(self):
