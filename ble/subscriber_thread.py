@@ -21,7 +21,7 @@ BROKER_IP = "80.211.69.17"    # "192.168.1.151" # my laptop
 class MQTTSubscriber(LogThread):
     client: mqtt.Client
     devices_dict = {}   # dictionary of the form: {mac: {origin: <rssi_queue>}}, being mac = <device sniffed>, origin = <sniffer> (rberry pi)
-    QUEUE_LENGTH = 5
+    QUEUE_LENGTH = 4
     nodes: Nodes
     effectors: Effectors
     all_devs = set()
