@@ -230,7 +230,7 @@ class Parser:
         '''
         Loads the 3D points associated to a building with discrimination of indoor and outdoor
         '''
-        def read_points_from_txt(self, file_path=None, f=None):
+        def read_points_from_txt(self, file_path=None, f=None, floors=None):
             assert file_path is not None or f is not None, "No file"
             if f is None:
                 # file_path = "{}{}".format(file_path, "map-v1/points.txt")
@@ -240,17 +240,35 @@ class Parser:
             # parse the file to have list of x, y, z vals
             for line in lines:
                 vals = line.split(",")
-                x, y, z, r, g, b = float(vals[0]), float(vals[1]), float(vals[2]), int(vals[3]), int(vals[4]), int(
-                    vals[5])
+                x, y, z = float(vals[0]), float(vals[1]), float(vals[2])
+                r, g, b = 0, 0, 0
+                if len(vals) > 3:
+                    r, g, b = int(vals[3]), int(vals[4]), int(
+                        vals[5])
                 isIndoor = (r == 255)
-                isLectureRoom, isWideArea, isHallway, isStair, isToilet, isLift = \
-                    (g == 0), (g == 30), (g == 60), (g == 90), (g == 120), (g == 150)
+                if floors is None or z in floors:
+                    isLectureRoom, isWideArea, isHallway, isStair, isToilet, isLift = \
+                        (g == 0), (g == 30), (g == 60), (g == 90), (g == 120), (g == 150)
+                else:
+                    # here we have for sure a stair point, as the floors were defined and z is not in floors
+                    isLectureRoom, isWideArea, isHallway, isStair, isToilet, isLift = \
+                        False, False, False, True, False, False
                 # we are currently not using all these info: only stair and indoor
                 # TODO it would be great to cluster the rooms and init them with a PoI
                 points.append(
                     Point3D.buildPoint(x, y, z, isIndoor, isLectureRoom, isWideArea, isHallway, isStair, isToilet,
                                        isLift))
             return points
+
+        def read_floors_z(self, file_path):
+            f = open(file_path, 'r')
+            lines = f.readlines()
+            z_vals = []
+            # parse the file to have list of x, y, z vals
+            for line in lines:
+                vals = line.split(",")
+                z_vals.append(float(vals[2]))
+            return z_vals
 
         def parse_node(self, idx, node):
             # splits = node.split(r'\t+')
