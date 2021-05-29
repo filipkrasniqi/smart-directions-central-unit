@@ -14,7 +14,7 @@ It will compute the position and communicate it accordingly.
 class Localization:
 
     def rssiThreshold(self):
-        return -50
+        return -65
     def timeThreshold(self):
         return 2000  # 3s expressed in ms
     def getType(self):
@@ -59,7 +59,7 @@ class NeighboursLocalization(Localization):
 
 class NodeLocalization(Localization):
     def topic(self, effector):
-        return "directions/effector/activate/{}".format(effector.mac)
+        return "directions/effector/activate/{}".format(effector.mac.upper())
     def build_messages(self, **kwargs):
         # each pair (node, device) has a message of the form: (node, device, is_close)
         # effectors, nodes, devices, devices_dict = kwargs["effectors"], kwargs["nodes"], kwargs["devices"], kwargs["devices_dict"]
