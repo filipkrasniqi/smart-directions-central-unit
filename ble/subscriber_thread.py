@@ -113,7 +113,7 @@ class MQTTSubscriber(LogThread):
         while True:
             localizationTimer = LocalizationTimer(self.client, self.sd_instance, self.devices_dict, LocalizationType.NODE)
             localizationTimer.start()
-            time.sleep(2)
+            time.sleep(0.5)
             # TODO here it is the right place where to clean up a bit
 
     def device_rssi(self, idDevice):
