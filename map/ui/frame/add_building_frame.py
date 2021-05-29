@@ -1,5 +1,7 @@
+import os
 import tkinter as tk
-from tkinter import filedialog
+from os.path import join
+from tkinter import filedialog, messagebox
 
 from map.elements.planimetry.building import Building
 from map.elements.planimetry.point_type import PointType
@@ -30,8 +32,8 @@ class AddBuilding(tk.Toplevel):
         self.wm_title("New building" if not self.isUpdate else "Edit building {}".format(self.currentBuilding))
 
         # setting grid shape
-        self.master.grid_columnconfigure(0, weight=6)
-        self.master.grid_columnconfigure(1, weight=1)
+        #self.master.grid_columnconfigure(0, weight=6)
+        #self.master.grid_columnconfigure(1, weight=1)
 
         self.canvas = None
 
@@ -81,9 +83,17 @@ class AddBuilding(tk.Toplevel):
         self.confirmFloor.grid(column=1, row=9)
         self.confirmFloor.configure(state="disabled")
 
-        self.loadBtn = tk.Button(self, text="Load home", fg="grey",
+        self.loadHomeBtn = tk.Button(self, text="Load home", fg="grey",
                              command=self.buildHome)
-        self.loadBtn.grid(column=1, row=10)
+        self.loadHomeBtn.grid(column=1, row=11)
+
+        self.loadAntlabBtn = tk.Button(self, text="Load ANTLab", fg="grey",
+                             command=self.buildANTLab)
+        self.loadAntlabBtn.grid(column=1, row=12)
+
+        self.loadEdificio11Btn = tk.Button(self, text="Load Edificio 11", fg="grey",
+                             command=self.buildEdificio11)
+        self.loadEdificio11Btn.grid(column=1, row=13)
 
         if self.isUpdate:
             self.enableButtons()
@@ -102,7 +112,18 @@ class AddBuilding(tk.Toplevel):
         self.destroy()
 
     def buildHome(self):
-        self.set_building(Building(id=self.id, name="Casa - {}".format(self.id)))
+        self.set_building(Building(id=self.id, name="Casa - {}".format(self.id), is_home=True))
+        self.confirm_building()
+
+    def buildANTLab(self):
+        self.set_building(Building(id=self.id, name="ANTLab - {}".format(self.id), is_antlab=True))
+        self.confirm_building()
+
+    def buildEdificio11(self):
+        self.set_building(Building(id=self.id, name="Edificio 11 - {}".format(self.id), is_edificio11=True))
+        self.confirm_building()
+
+    def confirm_building(self):
         self.currentFloor = 0
         self.enableButtons()
         self.updateUIWithBuildingInfo()
@@ -113,14 +134,16 @@ class AddBuilding(tk.Toplevel):
     Opens UI to select files. Updates the UI if a proper file is provided with the new building.
     '''
     def loadFromFile(self):
-        filename = filedialog.askopenfilename(initialdir = "/",title = "Select file",filetypes = [("Txt files", ".txt")])
-        parser = Parser("").getInstance()
-        points = parser.read_points_from_txt(filename)
-        self.set_building(Building(id=self.id, latitude=0, longitude=0, points=points, name="Nuovo edificio - {}".format(self.id)))
-        self.currentFloor = 0
-        self.enableButtons()
-        self.updateUIWithBuildingInfo()
-        self.drawFloor()
+        path_directory = filedialog.askdirectory()#askopenfilename(initialdir = "assets/",title = "Select directory",filetypes = [("Txt files", ".txt")])
+        path_floors, path_mesh = join(path_directory, 'floors.txt'), join(path_directory, 'mesh.txt')
+        if os.path.isfile(path_floors) and os.path.isfile(path_mesh):
+            parser = Parser("").getInstance()
+            floors = parser.read_floors_z(path_floors)
+            points = parser.read_points_from_txt(path_mesh, floors=floors)
+            self.set_building(Building(id=self.id, latitude=0, longitude=0, points=points, floors=floors, name="Nuovo edificio - {}".format(self.id)))
+            self.confirm_building()
+        else:
+            messagebox.showerror("error", "Directory must contain floors.txt and mesh.txt in the correct format")
 
     def set_building(self, building):
         self.currentBuilding = building
@@ -176,7 +199,7 @@ class AddBuilding(tk.Toplevel):
                     if PointType.isValid(cell):
                         matrixRGB[j, i] = [255, 255, 255] if cell == PointType.STAIR else ([0, 0, 0] if cell == PointType.LIFT else ([255, 0, 255] if cell == PointType.STAIR_PIVOT else [128, 0, 255]))
             # resizing the matrix for the canvas and adjusting the canvas
-            self.hsize = 400
+            self.hsize = 600
             self.ratioUIMatrix = (self.hsize / float(matrixRGB.shape[0]))
             self.finalWidth = int((float(matrixRGB.shape[1]) * float(self.ratioUIMatrix)))
 
@@ -184,7 +207,17 @@ class AddBuilding(tk.Toplevel):
                 self.canvas.destroy()
 
             self.canvas = tk.Canvas(self, width=self.finalWidth, height=self.hsize)
-            self.canvas.grid(column=0, row=0, rowspan=8)
+            self.canvas.grid(column=0, row=0)
+            '''
+            self.canvas.grid(column=0, row=0)
+            scroll_x = tk.Scrollbar(self, orient="horizontal", command=self.canvas.xview)
+            scroll_x.grid(row=1, column=0, sticky="ew")
+
+            scroll_y = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+            scroll_y.grid(row=0, column=1, sticky="ns")
+
+            self.canvas.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+'''
             # building the image and resizing it
             image = Image.fromarray(matrixRGB, 'RGB')
             self.matrix = matrixRGB
@@ -193,13 +226,15 @@ class AddBuilding(tk.Toplevel):
             self.canvas.create_image(0, 0, image=photo, anchor=tk.NW)
             # creating the grid in the canvas
             row, col = int(self.ratioUIMatrix), int(self.ratioUIMatrix)
+
             while row < self.hsize or col < self.finalWidth:
                 if row < self.hsize:
                     self.canvas.create_line(0, row, self.finalWidth, row)
-                    row = int(row+self.ratioUIMatrix)
+                    row = round(row+self.ratioUIMatrix)
                 if col < self.finalWidth:
                     self.canvas.create_line(col, 0, col, self.hsize)
-                    col = int(col+self.ratioUIMatrix)
+                    col = round(col+self.ratioUIMatrix)
+
             self.canvas.bind('<Button-1>', self.onCanvasClick)
             self.canvas.bind('<Button-2>', self.onCanvasDoubleClick)
             self.canvas.bind('<Motion>', self.onCanvasHover)

@@ -26,14 +26,34 @@ class Building(Position):
     def __init__(self, **kwargs):
         self.id, x, y, z, points, name = \
             kwargs.get('id', -1), kwargs.get('x', 0), kwargs.get('y', 0), kwargs.get('z', 0), \
-            kwargs.get('points', Building.antlab_planimetry()), kwargs.get('name', "")
-        Position.__init__(self, x, y, z, name)
+            kwargs.get('points', None), kwargs.get('name', "")
+        self.unique_z_from_file = None
+
         self.connections, self.floors, self.floorsObjects, self.anchors, self.effectors, self.pois = \
             None, None, None, None, None, None
-        # inits anchors, effectors, pois, ...
-        self.points: list[Point3D] = points
-        self.__initBuilding()
-        # TODO here I potentially could build the distance matrix also among different floors
+
+        is_home, is_antlab, is_edificio11 = kwargs.get('is_home', False), kwargs.get('is_antlab', False), \
+                                            kwargs.get('is_edificio11', False)
+
+        if is_home:
+            points = Building.home_planimetry()
+        elif is_antlab:
+            points = Building.antlab_planimetry()
+        elif is_edificio11:
+            self.init_edificio11()
+
+        Position.__init__(self, x, y, z, name)
+
+        if not is_edificio11:
+
+            # it is None if it is not a static import
+            if self.unique_z_from_file is None:
+                self.unique_z_from_file = kwargs.get('floors', None)
+                if self.unique_z_from_file is not None:
+                    self.unique_z_from_file = sorted([round(z, 2) for z in self.unique_z_from_file])
+
+            #self.points: list[Point3D] = points
+            self.__initBuilding(points)
         '''
         for floor in range(self.numFloors):
             pois, pivots = self.pois[floor], self.pivots[floor]
@@ -43,6 +63,9 @@ class Building(Position):
                 self.distanceMatrixPivotsPoIs["{}_{}".format(poi.__hash__(), pivot.__hash__())] = abs(poi.x-pivot.x)+abs(poi.y-pivot-y)
         '''
         # routing table: comprehends distances between each pivot and those to which it is connected
+
+    def build_dict_points(self, points):
+        return {p.__hash__() for p in points}
 
     def initRouting(self):
         # routing table: it's a dict of dicts, s.t. routingTable[poi] = dictAnchor; routingTable[poi][anchor] = nextPoint
@@ -72,11 +95,13 @@ class Building(Position):
     '''
     Get the smallest cube that includes all the points of the building 
     '''
-    def getMinMaxVals(self):
+    def getMinMaxVals(self, points = None):
+        if points is None:
+            points = self.points
         x_arr, y_arr, z_arr = \
-            [point.x for point in self.points], \
-            [point.y for point in self.points], \
-            [point.z for point in self.points]
+            [point.x for point in points], \
+            [point.y for point in points], \
+            [point.z for point in points]
 
         return min(x_arr), max(x_arr), min(y_arr), max(y_arr), min(z_arr), max(z_arr)
     '''
@@ -140,16 +165,34 @@ class Building(Position):
         return Position(x_val, y_val, floor)
 
     def searchPoints(self, x, y, z):
-        points = [p for p in self.points if p.__hash__() == Position.computeHash(x, y, z)]
-        assert len(points) > 0, 'Point not found'
-        return points
+        # TODO currently returning list for previous implementation
+        key = Position.computeHash(x, y, z)
+        if key in self.dictPoints:
+            return [self.dictPoints[key]]
+        else:
+            print("WARNING: point was not available")
+            return []
 
     def searchPoint(self, x, y, z, className = None):
         points = self.searchPoints(x, y, z)
         if className is not None:
             points = list(filter(lambda x: isinstance(x, className), points))
-        return None if len(points) <= 0 else points[0]
+        if len(points) <= 0:
+            return None
+        return points[0]
 
+    def searchPivotPoint(self, x, y, floor):
+        points = self.searchPoints(x, y, floor)
+        if len(points) <= 0:
+            return None
+        point = points[0]
+        if not point.isConnection():
+            return None
+        point: ConnectionPoint3D = point
+        # can be none
+        return point.getPivot()
+
+    # Old implementation of searchPivotPoint
     def searchPointFromPivotList(self, x, y, floor):
         pivots = self.pivots[floor]
         points = [p for p in pivots if p.x == x and p.y == y]
@@ -181,7 +224,7 @@ class Building(Position):
             # we compute the groups
             uniqueGroupsIdxs, _ = ndimage.label(connectionPoints)
             size = np.bincount(uniqueGroupsIdxs.ravel())
-            if len(size) > 1:   # true if I have something on this floor
+            if len(size) >= 1:   # true if I have something on this floor
                 biggestIdx = uniqueGroupsIdxs.max()
                 for labelNum in range(biggestIdx):
                     clumpVal = labelNum+1
@@ -209,7 +252,8 @@ class Building(Position):
                         for y in range(uniqueGroupsIdxs.shape[1]):
                             if uniqueGroupsIdxs[x, y] == clumpVal:
                                 point = self.searchPoint(x, y, floor, ConnectionPoint3D)
-                                point.setPivot(pivotPoint)
+                                if point is not None:
+                                    point.setPivot(pivotPoint)
 
     '''
     Duplicate points are removed.
@@ -232,15 +276,18 @@ class Building(Position):
     It does that by taking all distinct z values related to non connection points
     '''
     def floorUniqueZ(self):
-        nonConnectionPoints = list(filter(lambda x: not x.isConnection(), self.points))
-        # init the floors with the Z values. The floor is a transformation into discrete values of Z
-        # computing the floors for those points that are not connection ones
-        unique_z = set()
-        for p in nonConnectionPoints:
-            unique_z.add(p.z)
-        unique_z = list(unique_z)
-        unique_z.sort()
-        return unique_z
+        if self.unique_z_from_file is None:
+            _, nonConnectionPoints = self.split_points_into_connection()
+            # init the floors with the Z values. The floor is a transformation into discrete values of Z
+            # computing the floors for those points that are not connection ones
+            unique_z = set()
+            for p in nonConnectionPoints:
+                unique_z.add(p.z)
+            unique_z = list(unique_z)
+            unique_z.sort()
+            return unique_z
+        else:
+            return self.unique_z_from_file
 
     '''
     Returns a dict having floor value as key pointing at the corresponding z
@@ -266,7 +313,7 @@ class Building(Position):
         # find the corresponding end points for each connection point
         for floor in range(self.numFloors-1):
             minZ, maxZ = z_given_floor[floor], z_given_floor[floor+1]
-            point_between_floors = list(filter(lambda p: minZ < p.z < maxZ, self.points))
+            point_between_floors = list(filter(lambda p: minZ <= p.z <= maxZ, self.points))
             # consider them as flattened to the floor and compute the intersection
             # so build a matrix with them
             stairsFlattened = np.zeros(shape=self.floors[0].shape)
@@ -278,7 +325,7 @@ class Building(Position):
             uniqueGroupsIdxs, _ = ndimage.label(connectionPoints)
             size = np.bincount(uniqueGroupsIdxs.ravel())
 
-            if len(size) > 1:   # true if I have something on this floor
+            if len(size) >= 1:   # true if I have something on this floor
                 biggestIdx = uniqueGroupsIdxs.max()
                 for labelNum in range(biggestIdx):
                     clumpVal = labelNum+1
@@ -293,66 +340,144 @@ class Building(Position):
                         i, pivotDown = 0, None
                         while i < len(xVals) and pivotDown is None:
                             x, y = xVals[i], yVals[i]
-                            pivotDown = self.searchPointFromPivotList(x, y, floor)
+                            pivotDown = self.searchPivotPoint(x, y, floor)
                             i += 1
                         assert pivotDown is not None, "PIVOT NON ESISTE!!!"
                         i, pivotUp = 0, None
                         xVals, yVals = np.where(intersection_2 > 0)
                         while i < len(xVals) and pivotUp is None:
                             x, y = xVals[i], yVals[i]
-                            pivotUp = self.searchPointFromPivotList(x, y, floor+1)
+                            pivotUp = self.searchPivotPoint(x, y, floor+1)
                             i += 1
                         assert pivotUp is not None, "PIVOT NON ESISTE!!!"
                         pivotDown.setPointUp(pivotUp.getPivot())
                         pivotUp.setPointDown(pivotDown.getPivot())
 
+    def split_points_into_connection(self, points=None):
+        if points is None:
+            points = self.points
+        connection_points, non_connection_points = [], []
+        if self.unique_z_from_file is None:
+            for p in points:
+                if not p.isConnection():
+                    non_connection_points.append(p)
+                else:
+                    connection_points.append(p)
+        else:
+            for p in points:
+                if p.z in self.unique_z_from_file:
+                    non_connection_points.append(p)
+                else:
+                    connection_points.append(p)
+        return connection_points, non_connection_points
 
+    def sort_points(self):
+        self.points.sort(key=lambda p: p.z * 1000000 + p.y * 10000 + p.x)
+
+    def init_num_floors(self, unique_z):
+        self.numFloors = len(unique_z)
+
+    def init_floors(self, nonConnectionPoints, width, height):
+        self.floors = np.zeros(shape=(self.numFloors, width, height))
+        for p in nonConnectionPoints:
+            self.floors[p.floor, p.x, p.y] = PointType.INDOOR.value if p.isIndoor else PointType.OUTDOOR
+            p.drawn = True
+
+    def init_connections(self, width, height):
+        self.connections = np.zeros(shape=(self.numFloors, width, height))
+
+    def set_connections(self, connectionPoints):
+        for p in connectionPoints:
+            if p.floor >= 0:
+                self.connections[p.floor, p.x, p.y] = p.pointType()
+                p.drawn = True
+
+    def init_dict_points(self):
+        # finally I don't need any more updates on the points: put them in dict to speed up search
+        self.dictPoints = {}
+        # here init dict
+        for p in self.points:
+            self.dictPoints[p.__hash__()] = p
+
+    def init_pivots(self):
+        self.pivots = [[] for _ in range(self.numFloors)]
     '''
     Init the building given the points.
     The output would be a list of floor obj (one for each floor), i.e. matrices having walkable / non-walkable points
     '''
-    def __initBuilding(self):
+    def __initBuilding(self, points):
         # sort points by (x, y, z). To do that, I need to normalize the value, so that I know how to weight differently
         # the coordinates
         # round all vals of points
-        for p in self.points:
+        for p in points:
             p.x, p.y, p.z = round(p.x, 2), round(p.y, 2), round(p.z, 2)
+
+        # check if points are too many: if so, sample regularly some (x, y) vals
+        # TODO do that only for points of the floors
+        if self.unique_z_from_file is not None:
+            points_of_floor = [p for p in points if p.z in self.unique_z_from_file]
+            unique_x = {p.x: True for p in points_of_floor}
+            x_vals = sorted(unique_x.keys())
+            if len(x_vals) > 20000:
+                sample_period_x = 2
+                for i, x in enumerate(x_vals):
+                    if i % sample_period_x != 0:
+                        unique_x.pop(x)
+            unique_y = {p.y: True for p in points_of_floor}
+            y_vals = sorted(unique_y.keys())
+            if len(y_vals) > 20000:
+                sample_period_y = 2
+                for i, y in enumerate(y_vals):
+                    if i % sample_period_y != 0:
+                        unique_y.pop(y)
+            for i, p in enumerate(points):
+                if p.z in self.unique_z_from_file:
+                    if p.x not in unique_x and p.y not in unique_y:
+                        points.pop(i)
+
         self.numFloors = 0
         # min and max for normalization
-        minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals()
+        minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals(points=points)
         getDeltaOrZero = lambda x1, x2: 1 if x1 == x2 else x1-x2
         deltaX, deltaY, deltaZ = getDeltaOrZero(maxX, minX), getDeltaOrZero(maxY, minY), getDeltaOrZero(maxZ, minZ)
         # first: remove the negative values by summing to each the min val if negative
-        for p in self.points:
+        for p in points:
             if minX < 0:
                 p.x += abs(minX)
             if minY < 0:
                 p.y += abs(minY)
             if minZ < 0:
                 p.z += abs(minZ)
+        if minZ < 0 and self.unique_z_from_file is not None:
+            self.unique_z_from_file = [z+abs(minZ) for z in self.unique_z_from_file]
         # recomputation of min, max vals
-        minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals()
+        minX, maxX, minY, maxY, minZ, maxZ = self.getMinMaxVals(points=points)
 
         # normalizing points in the range [0, 1]
-        for p in self.points:
+        for p in points:
             p.x, p.y, p.z = (p.x - minX) / deltaX, \
                             (p.y - minY) / deltaY, \
                             round((p.z - minZ) / deltaZ, 2)
+        if self.unique_z_from_file is not None:
+            self.unique_z_from_file = [round((z - minZ) / deltaZ, 2) for z in self.unique_z_from_file]
 
-        # filter out points that refer to stairs / lifts: they are not relevant
-        nonConnectionPoints = list(filter(lambda x: not x.isConnection(), self.points))
         # init the floors with the Z values. The floor is a transformation into discrete values of Z
         # computing the floors for those points that are not connection ones
         floor_given_z, unique_z = self.dictFloorGivenZ()
         z_given_floor, _ = self.dictZGivenFloor()
+
+        connectionPoints, nonConnectionPoints = self.split_points_into_connection(points=points)
 
         for p in nonConnectionPoints:
             p.floor = floor_given_z[p.z]
 
         # sort points by (in order): x, y, z with a weight to be minimized computed as: x + 10*y + 100*z,
         # being x, y, z in the range [0, 1]
-        self.points.sort(key=lambda p: p.z * 10000000000 + p.y * 100000 + p.x)
-        self.numFloors = len(unique_z)
+
+        self.points = points
+        self.sort_points()
+        self.init_num_floors(unique_z)
+
         # I compute the same transformation for X and Y, so that x € [0, W], y € [0, H]
         unique_x, unique_y, currentX, currentY = [], [], -1, -1
         for p in self.points:
@@ -379,15 +504,21 @@ class Building(Position):
         width, height = self.size_floor()
         # build list of matrices: WxH for each floor
         # self.floors is a list of masks defining whether it is indoor, outdoor or invalid
-        self.floors = np.zeros(shape=(self.numFloors, width, height))
-        for p in nonConnectionPoints:
-            self.floors[p.floor, p.x, p.y] = PointType.INDOOR.value if p.isIndoor else PointType.OUTDOOR
-            p.drawn = True
+        self.init_floors(nonConnectionPoints, width, height)
 
-        connectionPoints = list(filter(lambda x: x.isConnection(), self.points))
+        # this should be defined by color, but there may be no stair point in case color is not defined; if so, all connection points are considered stairs
+        # (kinda strong assumption)
         stairPoints = list(filter(lambda x: x.isStair(), connectionPoints))
+        if len(stairPoints) <= 0:
+            stairPoints = connectionPoints
 
-        self.connections = np.zeros(shape=(self.numFloors, width, height))
+        self.init_connections(width, height)
+        if self.unique_z_from_file is not None:
+            # in the current implementation, when reading from file
+            # connection points are considered to be stairs
+            for p in connectionPoints:
+                self.connections[p.floor, p.x, p.y] = PointType.STAIR
+
         unique_zStairs = list(set([p.z for p in stairPoints]))
         unique_zStairs.sort()
         dictStairZFloors = {}
@@ -414,21 +545,13 @@ class Building(Position):
                 if p.isStair():
                     p.setNextFloor(isUpDictStair[p.z])
 
-        for p in connectionPoints:
-            if p.floor >= 0:
-                self.connections[p.floor, p.x, p.y] = p.pointType()
-                p.drawn = True
+        self.set_connections(connectionPoints)
 
-        assert len([p for p in self.points if not p.drawn]) == 0, "Some points are not drawn!"
+        #assert len([p for p in self.points if not p.drawn]) == 0, "Some points are not drawn!"
 
-        self.pivots = [[] for _ in range(self.numFloors)]
-
-        self.dictPoints = {}
-        # here init dict
-        for p in connectionPoints:
-            isOnFloor = floor_given_z.get(p.z, -1) > 0
-            if isOnFloor:
-                self.dictPoints[p.__hash__()] = p
+        # finally I don't need any more updates on the points: put them in dict to speed up search
+        self.init_dict_points()
+        self.init_pivots()
 
         # I find the pivot points and assign to the other stair / lift points the corresponding
         self.__assignConnectionsPivot(PointType.STAIR)
@@ -752,10 +875,13 @@ class Building(Position):
     '''
     Adds an effector to the floor at the first available position
     '''
-    def addEffector(self, floor):
-        validCoordinates = self.findFirstValidCoordinate(floor)
+    def addEffector(self, floor, effector = None):
+        if effector is None:
+            validCoordinates = self.findFirstValidCoordinate(floor)
+        else:
+            validCoordinates = effector.x, effector.y
         effectors = self.effectors[floor]
-        effectors.add(Effector(len(effectors), validCoordinates[0], validCoordinates[1], floor, "Effettore {}".format(len(effectors)), "RNDM"))
+        effectors.add(Effector(len(effectors), validCoordinates[0], validCoordinates[1], floor, "Effettore {}".format(len(effectors)), effector.mac))
         self.floorsObjects[floor, validCoordinates[0], validCoordinates[1]] = PointType.EFFECTOR
 
     '''
@@ -939,11 +1065,123 @@ class Building(Position):
         points.append(Point3D(2, 10, z_const, True))
         return points
 
+    def init_edificio11(self):
+        dict_points = {}
+
+        points_to_add = {
+            0: {
+                "points": [
+                    [0, 10, 0, 70],
+                ],
+                "stairs": [
+                    [0, 10, 60, 70],
+                ]
+            },
+            1: {
+                "points": [
+                    [0, 10, 70, 90],
+                    [0, 30, 80, 90],
+                    [20, 30, 70, 80],
+                    [30, 40, 70, 80],
+                ],
+                "stairs": [
+                    [0, 10, 70, 80],
+                    [20, 30, 70, 80]
+                ]
+            },
+            2: {
+                "points": [
+                    [20, 30, 50, 60],
+                    [20, 30, 30, 50],
+                    [0, 30, 40, 60]
+                ],
+                "stairs": [
+                    [20, 30, 50, 60]
+                ]
+            }
+        }
+
+        for floor in points_to_add.keys():
+            blocks_points = points_to_add[floor]["points"]
+            for (x1, x2, y1, y2) in blocks_points:
+                for x in range(x1, x2):
+                    for y in range(y1, y2):
+                        p = Point3D(x, y, floor, True)
+                        p.floor = floor
+                        dict_points[p.__hash__()] = p
+            stair_points = points_to_add[floor]["stairs"]
+
+            for (x1, x2, y1, y2) in stair_points:
+                for x in range(x1, x2):
+                    for y in range(y1, y2):
+                        key = Position.computeHash(x, y, floor)
+                        if key in dict_points:
+                            p = StairPoint3D(x, y, floor, True)
+                            p.floor = floor
+                            dict_points[key] = p
+
+        self.points = list(dict_points.values())
+        self.unique_z_from_file = [0, 1, 2]
+
+        connectionPoints, nonConnectionPoints = [], []
+        for p in self.points:
+            if p.isConnection():
+                connectionPoints.append(p)
+            else:
+                nonConnectionPoints.append(p)
+
+        width, height = self.size_floor()
+
+        self.sort_points()
+        self.init_num_floors(self.unique_z_from_file)
+        self.init_floors(nonConnectionPoints, width, height)
+        self.init_connections(width, height)
+        self.set_connections(connectionPoints)
+
+        # assert len([p for p in self.points if not p.drawn]) == 0, "Some points are not drawn!"
+
+        # finally I don't need any more updates on the points: put them in dict to speed up search
+        self.init_dict_points()
+        self.init_pivots()
+
+        # I find the pivot points and assign to the other stair / lift points the corresponding
+        self.__assignConnectionsPivot(PointType.STAIR)
+        self.__assignConnectionsPivot(PointType.LIFT)
+
+        pivotFirstFloor = self.pivots[0][0]
+        pivotSecondFloorToFirst = self.pivots[1][0]
+        pivotSecondFloorToThird = self.pivots[1][1]
+        pivotThirdFloor = self.pivots[2][0]
+
+        pivotFirstFloor.setPointUp(pivotSecondFloorToFirst)
+
+        pivotSecondFloorToFirst.setPointDown(pivotFirstFloor)
+        pivotSecondFloorToThird.setPointUp(pivotThirdFloor)
+
+        pivotThirdFloor.setPointDown(pivotSecondFloorToThird)
+
+        if self.floorsObjects is None:
+            self.floorsObjects = np.zeros(shape=(self.numFloors, width, height))
+        if self.anchors is None:
+            self.anchors = [Nodes([], None) for _ in range(self.numFloors)]
+        if self.effectors is None:
+            self.effectors = [Effectors([]) for _ in range(self.numFloors)]
+        if self.pois is None:
+            self.pois = [PoIs([]) for _ in range(self.numFloors)]
+
+
+
     def get_anchors(self, floor = None):
         if floor is None:
             return self.raw_anchors()
         else:
             return self.anchors[floor]
+
+    def get_effectors(self, floor = None):
+        if floor is None:
+            return self.raw_effectors()
+        else:
+            return self.effectors[floor]
 
     def clean_anchors(self):
         self.anchors = [Nodes([], None) for _ in range(self.numFloors)]
