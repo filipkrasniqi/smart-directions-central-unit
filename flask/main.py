@@ -74,8 +74,26 @@ def init_node(mac_node):
     to_return = instance.add_node(mac_node.replace("\n", ""), wifi)
     return to_return
 
+@app.route('/effector/<mac_effector>/init', methods=['POST'])
+def init_effector(mac_effector):
+
+    data = request.json
+    assert data is not None and data["wifi"] is not None and data["id_sd"] is not None, "Wrong parameters"
+    for wifi in data["wifi"]:
+        assert wifi["mac"] is not None and wifi["rssi"] is not None, "Wrong wifi info: {}".format(wifi)
+
+    id_sd, wifi = data["id_sd"], data["wifi"]
+    instance: SmartDirectionInstance = parser.read_smartdirections_instance(id_sd)
+
+    to_return = instance.add_effector(mac_effector.replace("\n", ""), wifi)
+    return to_return
+
 @app.route('/node/<mac_node>/ping', methods=['POST'])
 def ping_from_node(mac_node):
+    return "OK"
+
+@app.route('/effector/<mac_node>/ping', methods=['POST'])
+def ping_from_effector(mac_node):
     return "OK"
 
 @app.route('/device/<id_device>/activate', methods=['POST'])
