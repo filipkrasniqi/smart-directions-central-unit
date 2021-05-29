@@ -3,7 +3,7 @@ venv/
 assets/map-v1/*
 assets/
 map/ui/frame/__pycache__/
-
+*DS_*
 
 map/elements/planimetry/__pycache__/
 
