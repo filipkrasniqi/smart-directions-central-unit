@@ -65,11 +65,6 @@ class NodeLocalization(Localization):
         # effectors, nodes, devices, devices_dict = kwargs["effectors"], kwargs["nodes"], kwargs["devices"], kwargs["devices_dict"]
         sd_instance, devices, devices_dict = kwargs["sd_instance"], kwargs["devices"], kwargs["devices_dict"]
 
-        # TODO questo building è quello nel quale viene attivato un effettore e del quale vengono considerate le ancore; per ora, è il primo che trova
-        # TODO da ora in avanti, sarà meglio avere la SD instance, nel quale vengono controllati nuovamente tutti i nodi X devices
-        # TODO per quanto riguarda l'activate, non la si fa più sul building ma sul sd_instance, in modo che se si è ai margini di un building si attiva ANCHE l'effettore d'inizio del building successivo -> navigazione EXTRA BUILDINGS
-
-
         # filtering: only in case the device is navigating we compute the localization
         active_devices = [device for device in devices if
                           "status" in devices_dict[device] and devices_dict[device]["status"] == Status.NAVIGATING]
@@ -96,6 +91,7 @@ class NodeLocalization(Localization):
         # for each device, use the closest anchor
         for device in best_anchors.keys():
             node = best_anchors[device]
+            color = devices_dict[device]['color']
             device_building = [b for b in sd_instance.buildings if devices_dict[device]['id_building']==b.id][0]
 
             device_destination = device_building.findPoI(devices_dict[device]['id_POI'])
@@ -114,12 +110,12 @@ class NodeLocalization(Localization):
             else:
                 effector = effectors_to_activate
                 if effector is not None:
-                    messages.append((effector, "{}$1${}${}".format(device, face_to_show, relative_message_to_show)))
+                    messages.append((effector, "{}$1${}${}${}".format(device, face_to_show, relative_message_to_show, color)))
                     all_effectors = device_building.raw_effectors()
                     for remaining_effector in all_effectors:
                         if remaining_effector.idx != effector:
                             messages.append(
-                                (remaining_effector, "{}$0${}${}".format(device, face_to_show, relative_message_to_show)))
+                                (remaining_effector, "{}$0${}${}${}".format(device, face_to_show, relative_message_to_show, color)))
                 else:
                     print("NON HO EFFETTORI DA ATTIVARE")
 

@@ -26,6 +26,8 @@ class MQTTSubscriber(LogThread):
     effectors: Effectors
     all_devs = set()
     log_nodes_dict = {} # for log purposes: shows last communication timestamp for each node
+    distinct_colors = [0, 1, 2, 3]
+    colors_dict = {}    # maps each destination with distinct color
 
     def on_connect(self, client, userdata, flags, rc):
         self.client.subscribe("directions/anchor/proximity/#")
@@ -36,7 +38,6 @@ class MQTTSubscriber(LogThread):
         self.client.message_callback_add('directions/device/deactivate/#', self.on_deactivate)
 
     def on_activate(self, client, userdata, msg):
-        key = msg.topic.split("/")[-1].lower()
         id_POI, id_building, key = msg.payload.decode('utf-8').split("$")
         self.activate_device(key, int(id_building), int(id_POI))
 
@@ -50,11 +51,26 @@ class MQTTSubscriber(LogThread):
         self.devices_dict[key]["status"] = Status.NAVIGATING
         self.devices_dict[key]['id_building']= id_building
         self.devices_dict[key]['id_POI']= id_POI
+        # assign color for that destination
+        # if all colors has been assigned, can't do much: we go back (so we do %)
+        # if for that destination no color has been assigned, it adds to colors_dict by taking first available colors
+        #  among those that are still navigating
+        if id_POI not in self.colors_dict:
+            assigned_colors = [device['color'] for device in self.devices_dict.keys()
+                               if 'color' in device and self.devices_dict[key]["status"] == Status.NAVIGATING]
+            if len(assigned_colors) <= 0:
+                to_assign_color = 0
+            else:
+                to_assign_color = (max(assigned_colors)+1)%len(self.distinct_colors)
+            self.colors_dict[id_POI] = to_assign_color
+        # we know for sure for that destination a color has been defined: we assign it to the user
+        self.devices_dict[key]['color'] = self.colors_dict[id_POI]
 
     def on_deactivate(self, client, userdata, msg):
         key = msg.topic.split("/")[-1].lower()
         if key in self.devices_dict:
             self.devices_dict[key]["status"] = Status.INACTIVE
+            print("{} deactivated!".format(key))
 
     def anchors(self):
         return self.sd_instance.raw_anchors()
