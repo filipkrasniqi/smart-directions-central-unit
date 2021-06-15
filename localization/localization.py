@@ -96,12 +96,6 @@ class NodeLocalization(Localization):
 
             device_destination = device_building.findPoI(devices_dict[device]['id_POI'])
 
-            # check values that do not differ much in time
-            if device in devices_dict and node.mac in devices_dict[device]:
-                current_vals = list(devices_dict[device][node.mac])
-                recent_values = list(map(lambda x: x["value"], filter(lambda x: x["timestamp"] + datetime.timedelta(0, self.timeThreshold()) > datetime.datetime.now(), current_vals)))
-            else:
-                recent_values = []
             # localization: node is close if threshold is greater than <rssiThreshold> and no other node is close
             effectors_to_activate, face_to_show, relative_message_to_show = device_building.toActivate(node, device_destination)
             if isinstance(effectors_to_activate, list):
