@@ -628,8 +628,11 @@ class Building(Position):
                     nextPivotsPosition.append(p.nextPointUp)
                 if p.nextPointDown is not None:
                     nextPivotsPosition.append(p.nextPointDown)
-
+            '''
             newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getPosition().getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors + 1) \
+                             for p in nextPivotsPosition]
+                             '''
+            newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors + 1) \
                              for p in nextPivotsPosition]
             candidates = list(set(candidates).union(set(newCandidates)).difference(visitedCandidates))
             candidates = list(filter(lambda p: p.distanceSoFar < distance, candidates))
@@ -638,17 +641,21 @@ class Building(Position):
         return distance
 
     def deleteObject(self, x, y, z):
+        # update building matrix
+        self.floorsObjects[z, x, y] = self.floors[z, x, y]
+        # delete object
         toDelete = self.getObjectAt(z, (x, y))
         # update instance of effector or whatever
         if toDelete.isEffector():
             self.effectors[toDelete.z].remove(toDelete)
         elif toDelete.isPoI():
-            self.pois[toDelete.z].remove(toDelete)
-            self.initRouting()
+            try:
+                self.pois[toDelete.z].remove(toDelete)
+                self.initRouting()
+            except:
+                print("WARNING: routing not initialized")
         elif toDelete.isAnchor():
             self.anchors[toDelete.z].remove(toDelete)
-        # update building matrix
-        self.floorsObjects[z, x, y] = self.floors[z, x, y]
 
     '''
     Given (x, y) 
@@ -667,11 +674,17 @@ class Building(Position):
         if start.isSameFloor(destination):
             path = destination.computePathList(start, self.floors)
             # reverse it: I want to know path from anchor to poi
+            # TODO instead, compute effector_to_activate by executing getClosestObject; remaining is the same
             effector_to_activate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
         else:
             pivots = self.pivots[floor]
+            '''
             distances = [pivot.getPosition().getDistance(start) + self.distanceMatrixPoiPivot.get(
                 "{}_{}".format(destination.__hash__(), pivot.__hash__())) for pivot in pivots]
+            '''
+            distances = [pivot.getDistance(start) + self.distanceMatrixPoiPivot.get(
+                "{}_{}".format(destination.__hash__(), pivot.__hash__())) for pivot in pivots]
+
             pivotIdx = np.argmin(distances)
             pivot = pivots[pivotIdx].getPosition()
             path = pivot.computePathList(start, self.floors)
@@ -866,8 +879,14 @@ class Building(Position):
         else:
             validCoordinates = anchor.x, anchor.y
         anchors = self.anchors[floor]
+
+        number_of_anchors = 0
+        for iter_floor in range(len(self.anchors)):
+            number_of_anchors += len(self.anchors[iter_floor])
+
         if anchor is None:
-            anchor = Node(len(anchors), validCoordinates[0], validCoordinates[1], floor, "Ancora {}".format(len(anchors)), "RNDM")
+            anchor = Node(number_of_anchors, validCoordinates[0], validCoordinates[1], floor, "Ancora {}".format(len(anchors)), "RNDM")
+
         x, y = anchor.x, anchor.y
         anchors.add(anchor)
         self.floorsObjects[floor, x, y] = PointType.ANCHOR
@@ -878,10 +897,17 @@ class Building(Position):
     def addEffector(self, floor, effector = None):
         if effector is None:
             validCoordinates = self.findFirstValidCoordinate(floor)
+            mac = "RNDM"
         else:
             validCoordinates = effector.x, effector.y
+            mac = effector.mac
         effectors = self.effectors[floor]
-        effectors.add(Effector(len(effectors), validCoordinates[0], validCoordinates[1], floor, "Effettore {}".format(len(effectors)), effector.mac))
+
+        number_of_effectors = 0
+        for iter_floor in range(len(self.effectors)):
+            number_of_effectors += len(self.effectors[iter_floor])
+
+        effectors.add(Effector(number_of_effectors, validCoordinates[0], validCoordinates[1], floor, "Effettore {}".format(len(effectors)), mac))
         self.floorsObjects[floor, validCoordinates[0], validCoordinates[1]] = PointType.EFFECTOR
 
     '''
@@ -890,7 +916,13 @@ class Building(Position):
     def addPoI(self, floor):
         validCoordinates = self.findFirstValidCoordinate(floor)
         pois = self.pois[floor]
-        pois.add(PoI(len(pois), validCoordinates[0], validCoordinates[1], floor, "PoI {}".format(len(pois))))
+
+        number_of_pois = 0
+
+        for iter_floor in range(len(self.pois)):
+            number_of_pois += len(self.pois[iter_floor])
+        
+        pois.add(PoI(number_of_pois, validCoordinates[0], validCoordinates[1], floor, "PoI {}".format(len(pois))))
         self.floorsObjects[floor, validCoordinates[0], validCoordinates[1]] = PointType.POI
 
     '''
