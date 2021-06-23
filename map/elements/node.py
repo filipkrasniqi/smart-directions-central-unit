@@ -25,4 +25,4 @@ class Node(Position):
 
     def __str__(self):
         position_str = Position.__str__(self)
-        return "{}\n{}".format(position_str, self.mac)
+        return "{}\n{}\n{}".format(position_str, self.mac, self.idx)

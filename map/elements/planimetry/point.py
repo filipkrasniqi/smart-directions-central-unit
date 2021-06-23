@@ -4,9 +4,10 @@ from map.elements.planimetry.point_type import PointType
 from map.elements.position import Position, WithPosition
 
 
-class Point3D(WithPosition):
+class Point3D(Position):
     def __init__(self, x, y, z, isIndoor):
-        self.x, self.y, self.z, self.isIndoor = x, y, z, isIndoor
+        Position.__init__(self, x, y, z, "Point3D")
+        self.isIndoor = isIndoor
         self.floor = -1
         self.drawn = False
         self.position = None

@@ -82,7 +82,7 @@ class Position(WithPosition):
         path = [currentPosition]
         #alreadyVisited = set([currentPosition])
         distance = self.getDistance(position)
-        while distance > 0:
+        while distance > 0 and currentPosition is not None:
             neighbours = [currentPosition.left(), currentPosition.right(self.distanceMatrix.shape[0]), \
                          currentPosition.top(), currentPosition.bottom(self.distanceMatrix.shape[1])]
             #neighbours = list(set(neighbours).difference(alreadyVisited))

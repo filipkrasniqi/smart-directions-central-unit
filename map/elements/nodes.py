@@ -34,3 +34,7 @@ class Nodes:
 
     def __getitem__(self, i):
         return self.nodes[i]
+
+    def updateDistanceMatrix(self, floors):
+        for node in self.nodes:
+            node.updateDistanceMatrix(floors)

@@ -165,7 +165,8 @@ class AddBuilding(tk.Toplevel):
             if currentFloor < self.currentBuilding.getNumberFloors():
                 self.currentFloor = currentFloor
                 self.drawFloor()
-        except:
+        except Exception as exc:
+            print(exc)
             pass
 
     '''
@@ -191,7 +192,11 @@ class AddBuilding(tk.Toplevel):
                         if not self.currentBuilding.isOccupied(i, j, self.currentFloor):
                             matrixRGB[j, i] = [255, 128, 0] if cell == PointType.INDOOR else [0,191,255] if cell == PointType.OUTDOOR else [128,128,128]
                         else:
-                            currentObject = self.currentBuilding.getObjectAt(self.currentFloor, (i, j))
+                            try:
+                                currentObject = self.currentBuilding.getObjectAt(self.currentFloor, (i, j))
+                            except:
+                                pass
+                                #self.currentBuilding.deleteObject(i, j, self.currentFloor)
                             matrixRGB[j, i] = currentObject.getColor()
 
             for i, row in enumerate(connectionsToDraw):

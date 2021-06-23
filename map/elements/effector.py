@@ -27,7 +27,7 @@ class Effector(Position):
 
     def __str__(self):
         position_str = Position.__str__(self)
-        return "{}\n{}".format(position_str, self.mac)
+        return "{}\n{}\n{}".format(position_str, self.mac, self.idx)
 
 class Effectors:
     def __init__(self, effectors):
@@ -58,3 +58,10 @@ class Effectors:
 
     def __getitem__(self, i):
         return self.effectors[i]
+
+    def updateDistanceMatrix(self, floors):
+        for effector in self.effectors:
+            try:
+                effector.updateDistanceMatrix(floors)
+            except:
+                print()

@@ -69,8 +69,8 @@ class Building(Position):
 
     def initRouting(self):
         # routing table: it's a dict of dicts, s.t. routingTable[poi] = dictAnchor; routingTable[poi][anchor] = nextPoint
-        dictAnchors = {anchor: {} for anchor in self.anchors}
-        self.routingTable = {poi: dictAnchors for poi in self.pois}
+        dictAnchors = {anchor: {} for anchor in self.raw_anchors()}
+        self.routingTable = {poi: dictAnchors for poi in self.raw_pois()}
 
         # computing distances for pois - pivots on same floor: comprehends distances between pois and pivots of same floor
         for floor in range(self.numFloors):
@@ -78,13 +78,41 @@ class Building(Position):
                 poi.updateDistanceMatrix(self.floors)
             for pivot in self.pivots[floor]:
                 pivot.updateDistanceMatrix(self.floors)
+            for anchor in self.anchors[floor]:
+                anchor.updateDistanceMatrix(self.floors)
+            for effector in self.effectors[floor]:
+                effector.updateDistanceMatrix(self.floors)
 
+        # initializing the dictionary of the form: key = {<poi>|<effector>|<anchor>-pivot} -> distance
+        self.distanceMatrixPoiPivot = {}
         floorsCombination = itertools.product(*[range(self.numFloors),range(self.numFloors)])
 
-        # initializing the dictionary of the form: key = <poi> - <anchor> -> distance
+        for floor1, floor2 in floorsCombination:
+            pois_1, effectors_1, anchors_1 = self.pois[floor1], self.effectors[floor1], self.anchors[floor1]
+            pivots2 = self.pivots[floor2]
+            for poi, pivot in itertools.product(*[pois_1, pivots2]):
+                key = "{}_{}".format(poi.__hash__(), pivot.__hash__())
+                if key in self.distanceMatrixPoiPivot:
+                    print()
+                self.distanceMatrixPoiPivot.update({key: self.computeDistanceAnchorPivot(poi, pivot)})
+            for effector, pivot in itertools.product(*[effectors_1, pivots2]):
+                key = "{}_{}".format(effector.__hash__(), pivot.__hash__())
+                if key in self.distanceMatrixPoiPivot:
+                    print()
+                self.distanceMatrixPoiPivot.update(
+                    {key: self.computeDistanceAnchorPivot(effector, pivot)})
+            for anchor, pivot in itertools.product(*[anchors_1, pivots2]):
+                key = "{}_{}".format(anchor.__hash__(), pivot.__hash__())
+                if key in self.distanceMatrixPoiPivot:
+                    print()
+                self.distanceMatrixPoiPivot.update(
+                    {key: self.computeDistanceAnchorPivot(anchor, pivot)})
+
+        '''
         self.distanceMatrixPoiPivot = {"{}_{}".format(poi.__hash__(), pivot.__hash__()): self.computeDistance(poi, pivot) \
                                for floor1, floor2 in floorsCombination for poi, pivot in
                                itertools.product(*[self.pois[floor1], self.pivots[floor2]])}
+        '''
 
     '''
     Two buildings are equal if they both are instance of Building class and the ID is the same
@@ -379,9 +407,15 @@ class Building(Position):
 
     def init_floors(self, nonConnectionPoints, width, height):
         self.floors = np.zeros(shape=(self.numFloors, width, height))
+        for p in self.points:
+            self.floors[p.floor, p.x, p.y] = PointType.INDOOR.value if p.isIndoor else PointType.OUTDOOR
+        p.drawn = True
+
+    def init_floors_old(self, nonConnectionPoints, width, height):
+        self.floors = np.zeros(shape=(self.numFloors, width, height))
         for p in nonConnectionPoints:
             self.floors[p.floor, p.x, p.y] = PointType.INDOOR.value if p.isIndoor else PointType.OUTDOOR
-            p.drawn = True
+        p.drawn = True
 
     def init_connections(self, width, height):
         self.connections = np.zeros(shape=(self.numFloors, width, height))
@@ -588,15 +622,46 @@ class Building(Position):
     def computeOfflineMapForFloor(self):
         # for each poi, compute the DISTANCE MATRIX (1*)
         for level, poisAtLevel in enumerate(self.pois):
-            poisAtLevel.updateDistanceMatrix(self.floors, level)
+            poisAtLevel.updateDistanceMatrix(self.floors)
+        for level, anchorsAtLevel in enumerate(self.anchors):
+            anchorsAtLevel.updateDistanceMatrix(self.floors)
+        for level, effectorsAtLevel in enumerate(self.effectors):
+            effectorsAtLevel.updateDistanceMatrix(self.floors)
         # building the routing table (2*)
         # take all pois and anchors
-        pois = [poi for poi in [poisAtLevel for poisAtLevel in self.pois]]
-        anchors = [anchor for anchor in [anchorsAtLevel for anchorsAtLevel in self.anchors]]
+        pois = self.raw_pois()          #[poi for poi in [poisAtLevel for poisAtLevel in self.pois]]
+        anchors = self.raw_anchors()    #[anchor for anchor in [anchorsAtLevel for anchorsAtLevel in self.anchors]]
         for poi, anchor in itertools.product(*[pois, anchors]):
-            path = poi.computePathList(anchor, self.floors)
-            # TODO here I should check the level: should I return the value when computing the path???
-            nextAnchor = self.getObjectInPath(level, path, PointType.ANCHOR)
+            # if on same floor: find first anchor on path, if existing; if not, assign the poi
+            if poi.isSameFloor(anchor):
+                path = poi.computePathList(anchor, self.floors)
+                path_floor = anchor.z
+            else:
+                # if not, must consider the pivot
+                # first: assume that there is an anchor between the anchor itself and the pivot
+                pivot = self.get_best_pivot(anchor, poi)
+                path = pivot.computePathList(anchor, self.floors)
+                path_floor = anchor.z
+            try:
+                # if assumption is wrong, we fall here;
+                # assume that there is an anchor between the end point of the pivot and the poi
+                nextAnchor = self.getObjectInPath(path_floor, path, PointType.ANCHOR)
+            except:
+                assert not poi.isSameFloor(anchor), "Same floor case has already been handled"
+                # ASSUMPTION: path does not alternate up and down, so if poi is on upper floor, we only go up
+                if poi.z > anchor.z:
+                    pivot = pivot.nextPointUp
+                else:
+                    pivot = pivot.nextPointDown
+                if poi.isSameFloor(pivot):
+                    path = poi.computePathList(pivot, self.floors)
+                    path_floor = poi.z
+                else:
+                    pivot_2 = self.get_best_pivot(pivot, poi)
+                    path = pivot_2.computePathList(pivot, self.floors)
+                    path_floor = pivot_2.z
+                nextAnchor = self.getObjectInPath(path_floor, path, PointType.ANCHOR)
+
             # anchor is assigned iff there exists something in the middle. If not, it assigns the poi
             if nextAnchor:
                 self.routingTable[poi][anchor] = nextAnchor
@@ -610,7 +675,13 @@ class Building(Position):
         for anchor, poi in itertools.product(*[self.anchors, self.pois]):
             pass#self.routingTable[poi][anchor] = self.nextOnlinePath(anchor.getPosition(), poi.getPosition())
 
-    def computeDistance(self, start: Position, destination: Position):
+    def computeDistanceAnchorPivot(self, start: Position, destination: ConnectionPoint3D):
+        if start.z == destination.z:
+            return start.getDistance(destination)
+        # TODO bug here: function called for computing distance for different floors (for pivot-pois)
+        #   but it always return +inf when different floors, due to distanceSoFar being +inf
+        # we only consider paths following the direction monotonically
+        isStartPointUp = destination.z < start.z
         candidates = [PositionOnlinePath(destination.getPosition(), 0, 0)]
         visitedCandidates = set()
         distance = float("+inf")
@@ -620,23 +691,34 @@ class Building(Position):
             if candidate.z == start.z:
                 distanceCurrentFloor = start.getDistance(candidate)
                 distance = min(distance, candidate.distanceSoFar + distanceCurrentFloor)
+            else:
+                candidatePivots = [p for p in self.pivots[candidate.z] if
+                                   p.nextPointUp is not None and isStartPointUp or
+                                   p.nextPointDown is not None and not isStartPointUp]
 
-            candidatePivots = self.pivots[candidate.z]
-            nextPivotsPosition = []
-            for p in candidatePivots:
-                if p.nextPointUp is not None:
-                    nextPivotsPosition.append(p.nextPointUp)
-                if p.nextPointDown is not None:
-                    nextPivotsPosition.append(p.nextPointDown)
-            '''
-            newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getPosition().getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors + 1) \
-                             for p in nextPivotsPosition]
-                             '''
-            newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors + 1) \
-                             for p in nextPivotsPosition]
-            candidates = list(set(candidates).union(set(newCandidates)).difference(visitedCandidates))
-            candidates = list(filter(lambda p: p.distanceSoFar < distance, candidates))
-            candidates.sort(key = lambda p: p.navigatedFloors)
+                nextPivotsPosition = []
+                for p in candidatePivots:
+                    nextPivot = None
+                    if p.nextPointUp is not None and isStartPointUp:
+                        nextPivot = p.nextPointUp
+                    if p.nextPointDown is not None and not isStartPointUp:
+                        nextPivot = p.nextPointDown
+                    if nextPivot is not None:
+                        nextPivotsPosition.append((p, nextPivot))
+                '''
+                newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getPosition().getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors + 1) \
+                                 for p in nextPivotsPosition]
+                                 '''
+                '''
+                newCandidates = [PositionOnlinePath(p.getPosition(), candidate.distanceSoFar + p.getDistance(candidate) + p.connectionLength(), candidate.navigatedFloors + 1) \
+                                 for p in nextPivotsPosition]
+                                 '''
+                # TODO c'è un problema qui, inizializzo male la distance matrix per i pivot. Sistemare questo per far funzionare ...
+                newCandidates = [PositionOnlinePath(p[1].getPosition(), candidate.distanceSoFar + p[0].getDistance(candidate) + p[0].connectionLength(), candidate.navigatedFloors + 1) \
+                                 for p in nextPivotsPosition]
+                candidates = list(set(candidates).union(set(newCandidates)).difference(visitedCandidates))
+                candidates = list(filter(lambda p: p.distanceSoFar < distance, candidates))
+                candidates.sort(key = lambda p: p.navigatedFloors)
 
         return distance
 
@@ -665,31 +747,264 @@ class Building(Position):
         assert self.floorsObjects[floor][position.x, position.y] == PointType.POI, "Wrong object"
         return self.getObjectAt(floor, position.getCoordinates())
 
-    def findClosestEffector(self, floor, destination: Position):
-        distances_current_floor = [destination.getDistance(e) for e in self.effectors[floor]]
+    def findClosestEffectorOnSameFloor(self, point: Position):
+        floor = point.z
+        distances_current_floor = [point.getDistance(e) for e in self.effectors[floor]]
+        assert min(distances_current_floor) != float("+inf"), "Something wrong"
         return self.effectors[floor][np.argmin(distances_current_floor)]
 
-    def toActivate(self, start: Position, destination: Position):
+    def findClosestEffector(self, start: Position, destination: Position):
+        # TODO bug qui: start.getDistance da inf, quindi non riconosce che quell'effettore non è da considerare
+        if start.z == destination.z:
+            return self.findClosestEffectorOnSameFloor(start)
+        effectors_to_check = self.effectors[start.z]
         floor = start.z
-        if start.isSameFloor(destination):
-            path = destination.computePathList(start, self.floors)
+        distances_current_floor = [self.get_distance(start, e) for e in effectors_to_check]
+        distance_start_destination = self.get_distance(start, destination)
+        distances_effector_destination = [self.get_distance(e, destination) for e in effectors_to_check]
+
+        # TODO distancescurrent_floor are needed to compute the closest effector on the floor
+        #  among those that are close enough to the destination!
+        #  Distance_effector_destination is needed to understand whether the effector is to be considered or not
+        #  but it is not computed properly
+
+        # not considering those having higher distance than the one from the inferenced (start)
+        distances_current_floor = [d for d in distances_current_floor]
+        update_code = False #if true, does not consider simply the closest
+        if update_code:
+            for i, d in enumerate(distances_effector_destination):
+                if d > distance_start_destination:
+                    # make effector invalid: distance from it is higher than going from the anchor
+                    distances_current_floor[i] = float("+inf")
+        if min(distances_current_floor) == float("+inf"):
+            # check effectors of next floor following pivot
+            closest_effector = None
+            while closest_effector is None:
+                # get right pivot for that OD on same floor as start
+                pivot = self.get_best_pivot(start, destination)
+                # get the next connection point and assign it to pivot
+                if start.z > destination.z:
+                    pivot = pivot.nextPointDown
+                else:
+                    pivot = pivot.nextPointUp
+                # now we have pivot of next floor: if there is any effector on that floor, take it
+                try:
+                    closest_effector = self.findClosestEffectorOnSameFloor(pivot)
+                    return closest_effector
+                except:
+                    start = pivot
+        else:
+            return self.effectors[floor][np.argmin(distances_current_floor)]
+
+    def get_pivot_distance(self, pivot, destination):
+        return self.distanceMatrixPoiPivot.get(
+            "{}_{}".format(destination.__hash__(), pivot.__hash__()))
+
+    def get_distance(self, point: Position, destination: Position):
+        if point.isSameFloor(destination):
+            return point.getDistance(destination)
+        else:
+            pivot = self.get_best_pivot(point, destination)
+            return point.getDistance(pivot) + self.get_pivot_distance(pivot, destination)
+
+    '''
+    Returns the best pivot for a starting point, given a destination.
+    It assumes the pivot is needed (i.e., start and destination are on different floors)
+    '''
+    def get_best_pivot(self, start, destination):
+        pivots = self.pivots[start.z]
+        isGoingUp = destination.z > start.z
+        distances = [float("+inf") if not((isGoingUp and pivot.nextPointUp) or (not isGoingUp and pivot.nextPointDown)) else pivot.getDistance(start) + self.get_pivot_distance(pivot, destination) for pivot in pivots]
+
+        pivotIdx = np.argmin(distances)
+        return pivots[pivotIdx]
+
+    @staticmethod
+    def history_from_path(path):
+        i = 0
+        history_directions = []
+        while i < len(path) - 1:
+            currentPosition, nextPosition = path[i:i + 2]
+            if nextPosition is not None:
+                # compute the direction
+                xDiffer, yDiffer = currentPosition.x != nextPosition.x, currentPosition.y != nextPosition.y
+                right, top = currentPosition.x < nextPosition.x, currentPosition.y < nextPosition.y
+                if xDiffer:
+                    if right:
+                        history_directions.append(Direction.RIGHT)
+                    else:
+                        history_directions.append(Direction.LEFT)
+                else:
+                    if top:
+                        history_directions.append(Direction.TOP)
+                    else:
+                        history_directions.append(Direction.BOTTOM)
+
+            i += 1
+        return history_directions
+
+    def get_next_pivot(self, start: Position, destination: Position):
+        assert start.z != destination.z, "No need for pivot"
+        pivot = self.get_best_pivot(start, destination)
+        if start.z > destination.z:
+            return pivot.nextPointDown
+        else:
+            return pivot.nextPointUp
+
+    def compute_entire_path_list_from_matrix_OLD(self, start: Position, destination: PoI):
+        current_point = start
+        path = []
+        while not current_point.isSameFloor(destination):
+            pivot = self.get_best_pivot(current_point, destination)
+            nextPivot = self.get_next_pivot(current_point, destination)
+            path += current_point.computePathList(pivot, self.floors)
+            current_point = nextPivot
+        path += current_point.computePathList(destination, self.floors)
+        return path
+
+    def compute_entire_path_list_from_matrix(self, start: Position, destination: PoI):
+        current_point = start
+        path = []
+        reached_destination = False
+        while not reached_destination:
+            if current_point.isSameFloor(destination):
+                next_anchor = self.get_object_from_od(current_point, destination, PointType.ANCHOR)
+                if next_anchor and next_anchor.getDistance(destination) < current_point.getDistance(destination):
+                    # it means the next anchor is actually in the path
+                    next_effector = self.findClosestEffector(next_anchor, destination)
+                    if next_effector != current_point:
+                        next_point = next_effector
+                        path += current_point.computePathList(next_point, self.floors)
+                        current_point = next_point
+                    else:
+                        # it means, even though there is a new anchor, it is not reasonable to follow it
+                        reached_destination = True
+                        path += current_point.computePathList(destination, self.floors)
+                else:
+                    # it means, even though there is a new anchor, it is not reasonable to follow it
+                    reached_destination = True
+                    path += current_point.computePathList(destination, self.floors)
+            else:
+                next_point = self.get_best_pivot(current_point, destination)
+                next_pivot = self.get_next_pivot(current_point, destination)
+                next_anchor = self.get_object_from_od(current_point, next_point, PointType.ANCHOR)
+                if next_anchor:
+                    next_effector = self.findClosestEffector(next_anchor, destination)
+                    if current_point != next_effector:
+                        next_point = next_effector
+                path += current_point.computePathList(next_point, self.floors)
+                if not next_anchor:
+                    current_point = next_pivot
+                else:
+                    current_point = next_point
+
+        return path
+
+    def compute_last_path_list_from_matrix(self, start: Position, destination: PoI, num_values = 15):
+        return self.compute_entire_path_list_from_matrix(start, destination)[-1*num_values:]
+
+    def compute_first_path_list_from_matrix(self, start: Position, destination: PoI, num_values = 15):
+        return self.compute_entire_path_list_from_matrix(start, destination)[:num_values]
+
+    def toActivate(self, start: Position, destination: Position, origin: Position):
+        floor = start.z
+        effector_to_activate = self.findClosestEffector(start, destination)
+
+        if floor == destination.z:
+            # check if it has arrived at destination
+            closest_effector_to_destination = self.findClosestEffectorOnSameFloor(destination)
+
+            if closest_effector_to_destination.getId() == effector_to_activate.getId():
+                return effector_to_activate, Direction.ALL, MessageDirection.ARRIVED
+
+        path_origin_effector = self.compute_last_path_list_from_matrix(origin, effector_to_activate)
+        history_directions = Building.history_from_path(path_origin_effector)
+        direction_face = Direction(np.argmax(np.bincount(history_directions)))
+
+        path_effector_destination = self.compute_first_path_list_from_matrix(effector_to_activate, destination)
+        history_directions = Building.history_from_path(path_effector_destination)
+        absolute_message_to_show = Direction(np.argmax(np.bincount(history_directions)))
+
+        dict_faces = {
+            Direction.TOP: Direction.BOTTOM,
+            Direction.BOTTOM: Direction.TOP,
+            Direction.LEFT: Direction.LEFT,
+            Direction.RIGHT: Direction.RIGHT,
+        }
+
+        face_to_show = dict_faces[direction_face]
+
+        dict_messages = {
+            Direction.TOP: {
+                Direction.TOP: MessageDirection.BACK,
+                Direction.RIGHT: MessageDirection.RIGHT,
+                Direction.BOTTOM: MessageDirection.FORWARD,
+                Direction.LEFT: MessageDirection.LEFT
+            }, Direction.RIGHT: {
+                Direction.TOP: MessageDirection.RIGHT,
+                Direction.RIGHT: MessageDirection.FORWARD,
+                Direction.BOTTOM: MessageDirection.LEFT,
+                Direction.LEFT: MessageDirection.BACK
+            }, Direction.BOTTOM: {
+                Direction.TOP: MessageDirection.FORWARD,
+                Direction.RIGHT: MessageDirection.LEFT,
+                Direction.BOTTOM: MessageDirection.BACK,
+                Direction.LEFT: MessageDirection.RIGHT
+            }, Direction.LEFT: {
+                Direction.TOP: MessageDirection.LEFT,
+                Direction.RIGHT: MessageDirection.BACK,
+                Direction.BOTTOM: MessageDirection.RIGHT,
+                Direction.LEFT: MessageDirection.FORWARD
+            }
+        }
+        relative_message_to_show = dict_messages[face_to_show][absolute_message_to_show]
+        return effector_to_activate, face_to_show, relative_message_to_show
+
+    def toActivateV2(self, start: Position, destination: Position):
+        floor = start.z
+        effector_to_activate = self.findClosestEffector(start, destination)
+
+        if floor == destination.z:
+            # check if it has arrived at destination
+            closest_effector_to_destination = self.findClosestEffectorOnSameFloor(destination)
+
+            if closest_effector_to_destination.getId() == effector_to_activate.getId():
+                return effector_to_activate, Direction.ALL, MessageDirection.ARRIVED
+
+        if start.isSameFloor(effector_to_activate):
+            path_position_effector = start.computePathList(effector_to_activate, self.floors)
+        else:
+            nextPivot = self.get_next_pivot(start, effector_to_activate)
+            path_position_effector = nextPivot.computePathList(effector_to_activate, self.floors)
+        # initializing history directions
+        history_directions = Building.history_from_path(path_position_effector)
+
+        direction_face = Direction(np.argmax(np.bincount(history_directions)))
+
+        if effector_to_activate.isSameFloor(destination):
             # reverse it: I want to know path from anchor to poi
             # TODO instead, compute effector_to_activate by executing getClosestObject; remaining is the same
-            effector_to_activate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
-        else:
-            pivots = self.pivots[floor]
-            '''
-            distances = [pivot.getPosition().getDistance(start) + self.distanceMatrixPoiPivot.get(
-                "{}_{}".format(destination.__hash__(), pivot.__hash__())) for pivot in pivots]
-            '''
-            distances = [pivot.getDistance(start) + self.distanceMatrixPoiPivot.get(
-                "{}_{}".format(destination.__hash__(), pivot.__hash__())) for pivot in pivots]
+            # effector_to_activate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
 
-            pivotIdx = np.argmin(distances)
-            pivot = pivots[pivotIdx].getPosition()
+            path_effector_poi = effector_to_activate.computePathList(destination, self.floors)
+            # TODO same goes here
+            history_directions = Building.history_from_path(path_effector_poi)
+            absolute_message_to_show = Direction(np.argmax(np.bincount(history_directions)))
+        else:
+            pivotForEffector = self.get_best_pivot(effector_to_activate, destination)
+
+            path_effector_pivot = effector_to_activate.computePathList(pivotForEffector, self.floors)
+
+            history_directions = Building.history_from_path(path_effector_pivot)
+
+            absolute_message_to_show = Direction(np.argmax(np.bincount(history_directions)))
+            '''
             path = pivot.computePathList(start, self.floors)
             effector_to_activate, history_directions, remaining_path = self.getObjectInPath(floor, path, PointType.EFFECTOR)
+            '''
+        # TODO parse this to actual directions
 
+        '''
         # check if we arrived at destination
         if not effector_to_activate or effector_to_activate is None:
             effector_to_activate = self.findClosestEffector(floor, destination)
@@ -765,6 +1080,40 @@ class Building(Position):
                 }
             }
             relative_message_to_show = dict_messages[face_to_show][absolute_message_to_show]
+        '''
+        dict_faces = {
+            Direction.TOP: Direction.BOTTOM,
+            Direction.BOTTOM: Direction.TOP,
+            Direction.LEFT: Direction.LEFT,
+            Direction.RIGHT: Direction.RIGHT,
+        }
+
+        face_to_show = dict_faces[direction_face]
+
+        dict_messages = {
+            Direction.TOP: {
+                Direction.TOP: MessageDirection.BACK,
+                Direction.RIGHT: MessageDirection.RIGHT,
+                Direction.BOTTOM: MessageDirection.FORWARD,
+                Direction.LEFT: MessageDirection.LEFT
+            }, Direction.RIGHT: {
+                Direction.TOP: MessageDirection.RIGHT,
+                Direction.RIGHT: MessageDirection.FORWARD,
+                Direction.BOTTOM: MessageDirection.LEFT,
+                Direction.LEFT: MessageDirection.BACK
+            }, Direction.BOTTOM: {
+                Direction.TOP: MessageDirection.FORWARD,
+                Direction.RIGHT: MessageDirection.LEFT,
+                Direction.BOTTOM: MessageDirection.BACK,
+                Direction.LEFT: MessageDirection.RIGHT
+            }, Direction.LEFT: {
+                Direction.TOP: MessageDirection.LEFT,
+                Direction.RIGHT: MessageDirection.BACK,
+                Direction.BOTTOM: MessageDirection.RIGHT,
+                Direction.LEFT: MessageDirection.FORWARD
+            }
+        }
+        relative_message_to_show = dict_messages[face_to_show][absolute_message_to_show]
         return effector_to_activate, face_to_show, relative_message_to_show
 
     '''
@@ -783,7 +1132,7 @@ class Building(Position):
     Return whether a specific cell is valid (i.e., is an indoor / outdoor space or not)
     '''
     def isValid(self, x, y, floor):
-        return self.floors[floor, x, y] > 0
+        return self.floors[floor, x, y] > 0 and not PointType.isConnection(self.floorsObjects[floor, x, y] )
 
     '''
     Returns ID for the building
@@ -948,7 +1297,7 @@ class Building(Position):
             
     TODO should be updated with the multilevel concept
     '''
-    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 2, threshold_history = 1):
+    def getObjectInPath_OLD(self, numFloor, path, objectType, thresholdClose = 2, threshold_history = 5):
         floor = self.floorsObjects[numFloor]
         width, height = floor.shape
         i, objectToRetrieve = 0, False
@@ -999,6 +1348,56 @@ class Building(Position):
             return objectToRetrieve, history_directions, remaining_path
         else:
             return objectToRetrieve
+
+    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 4):
+        floor = self.floorsObjects[numFloor]
+        width, height = floor.shape
+        i, objectToRetrieve = 0, False
+        history_directions = []
+        while not objectToRetrieve and i < len(path):
+            currentPosition = path[i]
+            # improving the algorithm by checking the next direction: we don't want to check objs that were located in previous part of the path
+            if i+1 < len(path):
+                nextPosition = path[i+1]
+                # first: take the square that is built from the position in the path
+                minX, maxX, minY, maxY = currentPosition.x - thresholdClose, currentPosition.x + thresholdClose, currentPosition.y - thresholdClose, currentPosition.y + thresholdClose
+                # compute the direction
+                xDiffer, yDiffer = currentPosition.x != nextPosition.x, currentPosition.y != nextPosition.y
+                right, top = currentPosition.x < nextPosition.x, currentPosition.y < nextPosition.y
+                if xDiffer:
+                    if right:
+                        minX = currentPosition.x
+                        history_directions.append(Direction.RIGHT)
+                    else:
+                        maxX = currentPosition.x
+                        history_directions.append(Direction.LEFT)
+                else:
+                    if top:
+                        minY = currentPosition.y
+                        history_directions.append(Direction.TOP)
+                    else:
+                        maxY = currentPosition.y
+                        history_directions.append(Direction.BOTTOM)
+                # remove, given the direction, the limits given by the map
+                minX, maxX, minY, maxY = max(0, minX), min(width, maxX), max(0, minY), min(height, maxY)
+            else:
+                # shouldn't reach here, but if so, I simply take everything in the surroundings
+                minX, maxX = max(0, currentPosition.x - thresholdClose), min(width, currentPosition.x + thresholdClose)
+                minY, maxY = max(0, currentPosition.y - thresholdClose), min(height, currentPosition.y + thresholdClose)
+            neighboursMatrix = floor[minX:maxX, minY:maxY]
+            # find in the mask any (x, y) s.t. it is an objectToRetrieve. If not present, keep going
+            cols, rows = np.nonzero(neighboursMatrix == objectType)
+            if len(cols) > 0:
+                objectToRetrieve = self.getObjectAt(numFloor, (cols[0]+minX, rows[0]+minY))
+            else:
+                i += 1
+
+        return objectToRetrieve
+
+    def get_object_from_od(self, start: Position, destination: Position, objectType):
+        assert start.isSameFloor(destination), "Must be in same floor"
+        path = start.computePathList(destination, self.floors)
+        return self.getObjectInPath(start.z, path, objectType)
 
     '''
     Given a floor and the position (i,j), returns the object type at that position.

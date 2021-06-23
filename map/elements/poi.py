@@ -21,6 +21,11 @@ class PoI(Position):
 
     def getId(self):
         return "POI_{}".format(self.idx)
+
+    def __str__(self):
+        position_str = Position.__str__(self)
+        return "{}\n{}".format(position_str, self.idx)
+
     '''
     
     '''
@@ -44,6 +49,7 @@ class PoIWithBuilding(PoI):
     def __init__(self, poi: PoI, id_building: int):
         PoI.__init__(self, poi.idx, poi.x, poi.y, poi.z, poi.name)
         self.id_building = id_building
+        self.distanceMatrix = poi.distanceMatrix
 
 class PoIs:
     def __init__(self, pois):
@@ -71,6 +77,6 @@ class PoIs:
     def __getitem__(self, i):
         return self.pois[i]
 
-    def updateDistanceMatrix(self, floors, level):
-        for poi in self.pois:
-            poi.updateDistanceMatrix(floors, level)
+    def updateDistanceMatrix(self, floors):
+        for i, poi in enumerate(self.pois):
+            poi.updateDistanceMatrix(floors)
