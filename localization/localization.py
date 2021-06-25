@@ -95,9 +95,19 @@ class NodeLocalization(Localization):
             device_building = [b for b in sd_instance.buildings if devices_dict[device]['id_building']==b.id][0]
 
             device_destination = device_building.findPoI(devices_dict[device]['id_POI'])
+            # only first time: set it
+            if 'last_anchor' not in devices_dict[device]:
+                devices_dict[device]['last_anchor'] = node
+
+            # TODO see if it would be better to change this
+            is_v2 = False
+            if is_v2:
+                if node.idx != devices_dict[device]['last_anchor'].idx:
+                    devices_dict[device]['last_anchor'] = node
+            device_origin = device_building.findAnchor(devices_dict[device]['last_anchor'])
 
             # localization: node is close if threshold is greater than <rssiThreshold> and no other node is close
-            effectors_to_activate, face_to_show, relative_message_to_show = device_building.toActivate(node, device_destination)
+            effectors_to_activate, face_to_show, relative_message_to_show = device_building.toActivate(node, device_destination, device_origin)
             if isinstance(effectors_to_activate, list):
                 for effector in effectors_to_activate:
                     messages.append((effector, "{}${}".format(device, 1)))
