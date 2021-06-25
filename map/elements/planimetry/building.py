@@ -1349,7 +1349,7 @@ class Building(Position):
         else:
             return objectToRetrieve
 
-    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 4):
+    def getObjectInPath(self, numFloor, path, objectType, thresholdClose = 5):
         floor = self.floorsObjects[numFloor]
         width, height = floor.shape
         i, objectToRetrieve = 0, False
@@ -1502,29 +1502,29 @@ class Building(Position):
         points_to_add = {
             0: {
                 "points": [
-                    [0, 10, 0, 70],
+                    [40, 50, 0, 70],
                 ],
                 "stairs": [
-                    [0, 10, 60, 70],
+                    [40, 50, 60, 80],
                 ]
             },
             1: {
                 "points": [
-                    [0, 10, 70, 90],
-                    [0, 30, 80, 90],
+                    [40, 50, 70, 90],
+                    [10, 40, 80, 90],
                     [20, 30, 70, 80],
-                    [30, 40, 80, 90],
+                    [10, 20, 80, 90],
                 ],
                 "stairs": [
-                    [0, 10, 70, 80],
+                    [40, 50, 70, 80],
                     [20, 30, 70, 80]
                 ]
             },
             2: {
                 "points": [
                     [20, 30, 50, 60],
-                    [20, 30, 30, 50],
-                    [0, 30, 40, 60]
+                    [30, 40, 30, 50],
+                    [0, 40, 40, 60]
                 ],
                 "stairs": [
                     [20, 30, 50, 60]
@@ -1580,8 +1580,8 @@ class Building(Position):
         self.__assignConnectionsPivot(PointType.LIFT)
 
         pivotFirstFloor = self.pivots[0][0]
-        pivotSecondFloorToFirst = self.pivots[1][0]
-        pivotSecondFloorToThird = self.pivots[1][1]
+        pivotSecondFloorToFirst = self.pivots[1][1]
+        pivotSecondFloorToThird = self.pivots[1][0]
         pivotThirdFloor = self.pivots[2][0]
 
         pivotFirstFloor.setPointUp(pivotSecondFloorToFirst)
@@ -1653,3 +1653,7 @@ class Building(Position):
     def findPoI(self, idx_poi):
         pois = self.raw_pois()
         return [p for p in pois if p.idx == idx_poi][0]
+
+    def findAnchor(self, idx_anchor):
+        anchors = self.raw_anchors()
+        return [p for p in anchors if p.idx == idx_anchor][0]
