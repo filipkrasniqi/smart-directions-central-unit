@@ -156,7 +156,7 @@ if __name__ == "__main__":
         sd_instances_to_clean = [s for s in sd_instances if s.id in id_sds_to_clean]
         for sd_instance in sd_instances_to_clean:
             parser.clean_anchors(sd_instance)
-    sd_instances_to_execute = [1]
+    sd_instances_to_execute = [5]
     for sd_instance in sd_instances:
         if sd_instance.id in sd_instances_to_execute:
             activate_sd_instance(sd_instance.id, id_device=-1, id_building=-1, id_POI=-1)
