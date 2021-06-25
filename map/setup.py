@@ -7,7 +7,7 @@ from scipy import ndimage
 if __name__ == "__main__":
     #data_path = "/Users/filipkrasniqi/PycharmProjects/smartdirections/assets/"
     parser = Parser().getInstance()
-    id_sd = 3
+    id_sd = 5
 
     sd_instance = parser.read_smartdirections_instance(id_sd)
     building = sd_instance.buildings[0]
@@ -19,7 +19,8 @@ if __name__ == "__main__":
     destination = building.pois[2][0]
 
     is_v2 = False
-    is_v3 = True
+    is_v3 = False
+    is_v4 = True
 
     if is_v2:
         # TODO c'è un problema nel computePathList: distances sono tutte inf, why???
@@ -78,19 +79,44 @@ if __name__ == "__main__":
                 ]
             }
         }
+        i = 0
         for origin in tuples_to_check.keys():
             for destination in tuples_to_check[origin].keys():
                 for anchor in tuples_to_check[origin][destination]:
+                    if i == 5:
+                        print()
                     effector_to_activate, face_to_show, relative_message_to_show = building.toActivate(anchor, destination, origin)
-                    print("Starting from {}, "
+                    print("{}: Starting from {}, "
                           "localized in {}, "
                           "going to {}.\n "
                           "First effector: {}.\n"
                           "Face: {}, direction: {}\n\n"
-                          "".format(origin, anchor, destination,
+                          "".format(i, origin, anchor, destination,
                                      effector_to_activate,
                                      face_to_show,
                                      relative_message_to_show))
+                    i += 1
+    elif is_v4:
+        origins = building.raw_anchors()
+        destinations = building.raw_pois()
+        middle_points = building.raw_anchors()
+        i=0
+        for origin in origins:
+            for destination in destinations:
+                for anchor in middle_points:
+                    effector_to_activate, face_to_show, relative_message_to_show = building.toActivate(anchor,
+                                                                                                       destination,
+                                                                                                       origin)
+                    print("{}: Starting from {}, "
+                          "localized in {}, "
+                          "going to {}.\n "
+                          "First effector: {}.\n"
+                          "Face: {}, direction: {}\n\n"
+                          "".format(i, origin, anchor, destination,
+                                    effector_to_activate,
+                                    face_to_show,
+                                    relative_message_to_show))
+                    i+=1
     #start = building.anchors[1][10] # piano sopra
     #destination = building.pois[0][3]
 
