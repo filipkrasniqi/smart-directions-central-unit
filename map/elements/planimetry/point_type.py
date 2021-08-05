@@ -25,16 +25,19 @@ class PointType(IntEnum):
     def isConnection(pointType):
         return 6 <= pointType <= 7
 
+
 class Direction(IntEnum):
-    TOP=1
-    RIGHT=2
-    BOTTOM=3
-    LEFT=4
-    ALL=5
+    TOP = 0
+    RIGHT = 1
+    BOTTOM = 2
+    LEFT = 3
+    ALL = 4
+
 
 class MessageDirection(IntEnum):
-    FORWARD = 1
-    RIGHT = 2
-    BACK = 3
-    LEFT = 4
-    ARRIVED=5
+    FORWARD = 0
+    RIGHT = 1
+    BACK = 2
+    LEFT = 3
+    ARRIVED = 4
+    START = 5
