@@ -36,6 +36,10 @@ def activate_sd_instance(id_sd, id_device, id_building, id_POI):
     if id_building >= 0 and id_POI >= 0:
         subscriberThread.activate_device(id_device, id_building, id_POI)
 
+def deactivate_sd_instance(id_device):
+    for subscriber in subscribers.values():
+        if subscriber.has_device(id_device):
+            subscriber.deactivate_device(id_device)
 
 @app.route('/device/sd_instances', methods=['GET'])
 def sd_instances_list():
@@ -101,6 +105,11 @@ def select_sd_instance(id_device):
     data = request.json
     assert data is not None and data["id_sd"] is not None and data["id_POI"] is not None and data["id_building"] is not None, "Wrong parameters"
     activate_sd_instance(data["id_sd"], id_device, data["id_building"],data["id_POI"])
+    return "OK"
+
+@app.route('/device/<id_device>/deactivate', methods=['POST'])
+def deactivate_device(id_device):
+    deactivate_sd_instance(id_device)
     return "OK"
 
 @app.route('/device/<id_device>/save', methods=['POST'])
