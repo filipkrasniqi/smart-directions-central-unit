@@ -16,12 +16,14 @@ import datetime
 
 from utils.parser import Parser
 
-BROKER_IP = "80.211.69.17"    # "192.168.1.151" # my laptop
+BROKER_IP = "80.211.69.17"          # broker IP
+INACTIVITY_MAX_TIME_MS = 30000      # max inactivity time: max time a device can stay inactive
+MUTE_MAX_TIME_MS = 60000            # max mute time: max time device can be in navigating status without being found
 
 class MQTTSubscriber(LogThread):
     client: mqtt.Client
     devices_dict = {}   # dictionary of the form: {mac: {origin: <rssi_queue>}}, being mac = <device sniffed>, origin = <sniffer> (rberry pi)
-    QUEUE_LENGTH = 4
+    QUEUE_LENGTH = 3
     nodes: Nodes
     effectors: Effectors
     all_devs = set()
@@ -42,15 +44,18 @@ class MQTTSubscriber(LogThread):
         self.activate_device(key, int(id_building), int(id_POI))
 
     def activate_device(self, key, id_building, id_POI):
+        current_time = datetime.datetime.now()
         if key not in self.devices_dict:
             self.devices_dict[key] = {}
         for origin in self.anchors():
             if origin.mac not in self.devices_dict[key]:
-                mac_anchor = origin.mac.replace("\n", "")
-                self.devices_dict[key][mac_anchor] = collections.deque(self.QUEUE_LENGTH * [{"timestamp": datetime.datetime.now(), "value": -100}], self.QUEUE_LENGTH)
+                mac_anchor = origin.mac.replace("\n", "").lower()
+                self.devices_dict[key][mac_anchor] = collections.deque(self.QUEUE_LENGTH * [{"timestamp": current_time, "value": -100}], self.QUEUE_LENGTH)
         self.devices_dict[key]["status"] = Status.NAVIGATING
-        self.devices_dict[key]['id_building']= id_building
-        self.devices_dict[key]['id_POI']= id_POI
+        self.devices_dict[key]['time_active'] = current_time
+        self.devices_dict[key]['id_building'] = id_building
+        self.devices_dict[key]['id_POI'] = id_POI
+        self.devices_dict[key]['shown_first'] = False
         # assign color for that destination
         # if all colors has been assigned, can't do much: we go back (so we do %)
         # if for that destination no color has been assigned, it adds to colors_dict by taking first available colors
@@ -68,9 +73,18 @@ class MQTTSubscriber(LogThread):
 
     def on_deactivate(self, client, userdata, msg):
         key = msg.topic.split("/")[-1].lower()
-        if key in self.devices_dict:
-            self.devices_dict[key]["status"] = Status.INACTIVE
-            print("{} deactivated!".format(key))
+        self.deactivate_device(key)
+
+    def deactivate_device(self, device_id):
+        if self.has_device(device_id):
+            self.devices_dict[device_id]["status"] = Status.INACTIVE
+            self.devices_dict[device_id]["time_inactive"] = datetime.datetime.now()
+            self.log("{} deactivated!".format(device_id))
+        else:
+            self.log("WARNING: no such device: {}".format(device_id))
+
+    def has_device(self, device_id):
+        return device_id in self.devices_dict
 
     def anchors(self):
         return self.sd_instance.raw_anchors()
@@ -88,7 +102,6 @@ class MQTTSubscriber(LogThread):
         origin = msg.topic.split("/")[-1]
         if len(splits) >= 3:
             if len(splits) == 4:
-                # TODO check if this part is useful anymore: we have beacon ID that is universal
                 mac, rssi, timestamp, device_id = splits
                 mac = mac.lower()
                 device_id = device_id[:-1] # removing \n added by c++ code to have char*
@@ -104,14 +117,17 @@ class MQTTSubscriber(LogThread):
 
             # 'fa:03:63:cb:09:03'
             possible_devs = ['fa:03:63:cb:09:03']
+            sensor_time = datetime.datetime.fromtimestamp(int(timestamp))
             # checking that it actually exists
             if key in self.devices_dict:
                 # checking that node exists
                 if origin in [node.mac.replace("\n", "").lower() for node in self.anchors()]:
+                    origin = origin.lower()
                     # finally adding rssi
                     try:
                         rssi = int(rssi)
-                        self.devices_dict[key][origin].append({"timestamp": datetime.datetime.fromtimestamp(int(timestamp)), "value": rssi})
+                        self.devices_dict[key][origin].append({"timestamp": sensor_time, "value": rssi})
+                        self.devices_dict[key]["time_active"] = sensor_time
                     except:
                         self.errorLog("Unable to parse")
                 else:
@@ -119,6 +135,7 @@ class MQTTSubscriber(LogThread):
             else:
                 pass
                 #self.log("Unknown device communicating")
+                # TODO I could exploit this to tell the device to reset
         else:
             self.errorLog("Unable to split")
 
@@ -127,10 +144,29 @@ class MQTTSubscriber(LogThread):
 
     def run_timer(self):
         while True:
-            localizationTimer = LocalizationTimer(self.client, self.sd_instance, self.devices_dict, LocalizationType.NODE)
-            localizationTimer.start()
-            time.sleep(0.5)
-            # TODO here it is the right place where to clean up a bit
+            try:
+                localizationTimer = LocalizationTimer(self.client, self.sd_instance, self.devices_dict, LocalizationType.NODE)
+                localizationTimer.start()
+                time.sleep(0.5)
+                # clean up a bit
+                keys = list(self.devices_dict.keys())
+                i = 0
+                while i < len(keys):
+                    key = keys[i]
+                    if self.devices_dict[key]["status"] == Status.INACTIVE and "time_inactive" in self.devices_dict[key] and\
+                            self.devices_dict[key]["time_inactive"] + datetime.timedelta(milliseconds=INACTIVITY_MAX_TIME_MS) \
+                            < datetime.datetime.now():
+                        self.devices_dict.pop(key)
+                        self.log("Deleted inactive device: {}".format(key))
+                    if self.devices_dict[key]["status"] == Status.NAVIGATING and "time_active" in self.devices_dict[key] and\
+                            self.devices_dict[key]["time_active"] + datetime.timedelta(milliseconds=MUTE_MAX_TIME_MS)\
+                            < datetime.datetime.now():
+                        self.devices_dict.pop(key)
+                        self.log("Deleted mute device: {}".format(key))
+                    i += 1
+            except:
+                self.log("WARNING: something wrong during deleting")
+
 
     def device_rssi(self, idDevice):
         if idDevice in self.devices_dict:
