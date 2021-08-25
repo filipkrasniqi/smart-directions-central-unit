@@ -94,10 +94,14 @@ def init_effector(mac_effector):
 
 @app.route('/node/<mac_node>/ping', methods=['POST'])
 def ping_from_node(mac_node):
+    #data = request.json
+    #print("{} as anchor {}".format(mac_node, data.id))
     return "OK"
 
 @app.route('/effector/<mac_node>/ping', methods=['POST'])
 def ping_from_effector(mac_node):
+    #data = request.json
+    #print("{} as effector {}".format(mac_node, data.id))
     return "OK"
 
 @app.route('/device/<id_device>/activate', methods=['POST'])
