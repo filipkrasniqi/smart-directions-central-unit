@@ -34,7 +34,7 @@ class Localization:
 
 class NeighboursLocalization(Localization):
     def topic(self, effector):
-        return "directions/effector/neighbour/{}".format(effector.mac)
+        return "directions/effector/neighbour/effector_{}".format(effector.idx)
     def build_messages(self, **kwargs):
         # each pair (node, device) has a message of the form: (node, device, is_close)
         nodes, devices, devices_dict = kwargs["nodes"].nodes, kwargs["devices"], kwargs["devices_dict"]
@@ -43,8 +43,9 @@ class NeighboursLocalization(Localization):
         messages = []
         for node, device in itertools.product(*[nodes, active_devices]):
             # check values that do not differ much in time
-            if device in devices_dict and node.mac in devices_dict[device]:
-                current_vals = list(devices_dict[device][node.mac])
+            anchor_id = node.idx    # before: node.mac.lower()
+            if device in devices_dict and anchor_id in devices_dict[device]:
+                current_vals = list(devices_dict[device][anchor_id])
                 recent_values = list(map(lambda x: x["value"], filter(
                     lambda x: x["timestamp"] + datetime.timedelta(milliseconds=self.timeThreshold()) > datetime.datetime.now(),
                     current_vals)))
@@ -59,7 +60,7 @@ class NeighboursLocalization(Localization):
 
 class NodeLocalization(Localization):
     def topic(self, effector):
-        return "directions/effector/activate/{}".format(effector.mac.upper())
+        return "directions/effector/activate/effector_{}".format(effector.idx)
     def build_messages(self, **kwargs):
         # each pair (node, device) has a message of the form: (node, device, is_close)
         # effectors, nodes, devices, devices_dict = kwargs["effectors"], kwargs["nodes"], kwargs["devices"], kwargs["devices_dict"]
@@ -77,7 +78,8 @@ class NodeLocalization(Localization):
             found, best_val = False, self.rssiThreshold()
             closest_anchor = None
             for node in sd_instance.raw_anchors():
-                current_vals = list(devices_dict[device_key][node.mac.lower()])
+                anchor_id = node.idx    # before: node.mac.lower()
+                current_vals = list(devices_dict[device_key][anchor_id])
                 recent_values = list(map(lambda x: x["value"], filter(lambda x: x["timestamp"] + datetime.timedelta(milliseconds=self.timeThreshold()) > datetime.datetime.now(), current_vals)))
                 rssi_val = -100
                 if len(recent_values) > 0:
@@ -94,14 +96,17 @@ class NodeLocalization(Localization):
             color = devices_dict[device_key]['color']
             device_building = [b for b in sd_instance.buildings if devices_dict[device_key]['id_building']==b.id][0]
 
+            is_first_time = False
             device_destination = device_building.findPoI(devices_dict[device_key]['id_POI'])
-            # only first time: set it
+            # only first time: last_anchor is the last encountered anchor; first_anchor is the first encountered anchor
             if 'last_anchor' not in devices_dict[device_key]:
                 devices_dict[device_key]['last_anchor'] = node
+            if 'first_anchor' not in devices_dict[device_key]:
+                devices_dict[device_key]['first_anchor'] = node
 
             # this feature is currently not used.
             # if True, last_anchor is the last encountered (gets updated)
-            # if False, last_anchor is the first encountered
+            # if False, last_anchor is the same as the first encountered
             update_last_anchor = False
             if update_last_anchor:
                 if node.idx != devices_dict[device_key]['last_anchor'].idx:
@@ -109,27 +114,37 @@ class NodeLocalization(Localization):
             device_origin = devices_dict[device_key]['last_anchor']
 
             # localization: node is close if threshold is greater than <rssiThreshold> and no other node is close
-            effectors_to_activate, face_to_show, relative_message_to_show = device_building.toActivate(node, device_destination, device_origin)
-            if not devices_dict[device_key]['shown_first']:
-                from map.elements.planimetry.point_type import Direction, MessageDirection
-                face_to_show, relative_message_to_show = Direction.ALL, MessageDirection.START
-                devices_dict[device_key]['shown_first'] = True
+            effectors_to_activate, face_to_show, relative_message_to_show, absolute_message_to_show = \
+                device_building.toActivate(node, device_destination, device_origin)
 
-            if isinstance(effectors_to_activate, list):
-                for effector in effectors_to_activate:
-                    messages.append((effector, "{}${}".format(device_key, 1)))
-            else:
-                effector = effectors_to_activate
-                if effector is not None:
-                    messages.append((effector, "{}$1${}${}${}".format(device_key, face_to_show, relative_message_to_show, color)))
-                    all_effectors = device_building.raw_effectors()
-                    for remaining_effector in all_effectors:
-                        if remaining_effector.idx != effector.idx:
-                            # relevant only for smartphone effectors. Masters do not show the message persistently
-                            messages.append(
-                                (remaining_effector, "{}$0${}${}${}".format(device_key, face_to_show, relative_message_to_show, color)))
+            from map.elements.planimetry.point_type import Direction, MessageDirection
+
+            if not devices_dict[device_key]['shown_first']:
+                face_to_show, relative_message_to_show = Direction.ALL, MessageDirection.START
+
+            first_anchor_show_all_faces = False
+
+            if effectors_to_activate is not None:
+                if first_anchor_show_all_faces and devices_dict[device_key]['shown_first'] \
+                        and node.idx == devices_dict[device_key]['first_anchor'].idx\
+                        and relative_message_to_show != MessageDirection.ARRIVED:
+                    faces, directions = device_building.portDirectionsToFaces(absolute_message_to_show)
                 else:
-                    print("INFO: no effector to activate for device {}".format(device_key))
+                    faces, directions = [face_to_show], [relative_message_to_show]
+                for face_to_show, relative_message_to_show in zip(faces, directions):
+                    messages.append((effectors_to_activate, "{}$1${}${}${}".format(device_key, face_to_show, relative_message_to_show, color)))
+                all_effectors = device_building.raw_effectors()
+                for remaining_effector in all_effectors:
+                    if remaining_effector.idx != effectors_to_activate.idx:
+                        # relevant only for smartphone effectors. Masters do not show the message persistently
+                        messages.append(
+                            (remaining_effector, "{}$0${}${}${}".format(device_key, face_to_show, relative_message_to_show, color)))
+
+
+            else:
+                print("INFO: no effector to activate for device {}".format(device_key))
+
+            devices_dict[device_key]['shown_first'] = True
 
         return messages
     def getType(self):
