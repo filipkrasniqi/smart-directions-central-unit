@@ -915,7 +915,7 @@ class Building(Position):
             closest_effector_to_destination = self.findClosestEffectorOnSameFloor(destination)
 
             if closest_effector_to_destination.getId() == effector_to_activate.getId():
-                return effector_to_activate, Direction.ALL, MessageDirection.ARRIVED
+                return effector_to_activate, Direction.ALL, MessageDirection.ARRIVED, Direction.ALL
 
         path_origin_effector = self.compute_last_path_list_from_matrix(origin, effector_to_activate)
         history_directions = Building.history_from_path(path_origin_effector)
@@ -958,7 +958,49 @@ class Building(Position):
             }
         }
         relative_message_to_show = dict_messages[face_to_show][absolute_message_to_show]
-        return effector_to_activate, face_to_show, relative_message_to_show
+        return effector_to_activate, face_to_show, relative_message_to_show, absolute_message_to_show
+
+    def portDirectionsToFaces(self, absolute_message_to_show):
+
+        dict_faces = {
+            Direction.TOP: Direction.BOTTOM,
+            Direction.BOTTOM: Direction.TOP,
+            Direction.LEFT: Direction.LEFT,
+            Direction.RIGHT: Direction.RIGHT,
+        }
+
+        dict_messages = {
+            Direction.TOP: {
+                Direction.TOP: MessageDirection.BACK,
+                Direction.RIGHT: MessageDirection.RIGHT,
+                Direction.BOTTOM: MessageDirection.FORWARD,
+                Direction.LEFT: MessageDirection.LEFT
+            }, Direction.RIGHT: {
+                Direction.TOP: MessageDirection.RIGHT,
+                Direction.RIGHT: MessageDirection.FORWARD,
+                Direction.BOTTOM: MessageDirection.LEFT,
+                Direction.LEFT: MessageDirection.BACK
+            }, Direction.BOTTOM: {
+                Direction.TOP: MessageDirection.FORWARD,
+                Direction.RIGHT: MessageDirection.LEFT,
+                Direction.BOTTOM: MessageDirection.BACK,
+                Direction.LEFT: MessageDirection.RIGHT
+            }, Direction.LEFT: {
+                Direction.TOP: MessageDirection.LEFT,
+                Direction.RIGHT: MessageDirection.BACK,
+                Direction.BOTTOM: MessageDirection.RIGHT,
+                Direction.LEFT: MessageDirection.FORWARD
+            }
+        }
+
+        faces = [Direction.TOP, Direction.RIGHT, Direction.LEFT, Direction.BOTTOM]
+        faces_to_show, relative_messages_to_show = [], []
+        for direction_face in faces:
+            face_to_show = dict_faces[direction_face]
+            relative_message_to_show = dict_messages[face_to_show][absolute_message_to_show]
+            faces_to_show.append(face_to_show)
+            relative_messages_to_show.append(relative_message_to_show)
+        return faces_to_show, relative_messages_to_show
 
     def toActivateV2(self, start: Position, destination: Position):
         floor = start.z
